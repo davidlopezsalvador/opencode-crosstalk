@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
-# cross.ps1 - CLI del protocolo Cross-Talk (spec v0.2, Fase 1: transporte)
-# Subcomandos: health, whoami, sessions, read, config
-# Flags globales: --json (default), --human, --quiet, --no-cache, --health-skip, --port, --password, --config
+# cross.ps1 - Cross-Talk protocol CLI (spec v0.2, Phase 1: transport)
+# Subcommands: health, whoami, sessions, read, config
+# Global flags: --json (default), --human, --quiet, --no-cache, --health-skip, --port, --password, --config
 
 [CmdletBinding()]
 param(
@@ -21,7 +21,7 @@ $ModulePaths = @(
 )
 foreach ($mp in $ModulePaths) {
     if (-not (Test-Path -LiteralPath $mp)) {
-        [Console]::Error.WriteLine((ConvertTo-Json @{ ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); ok = $false; code = 70; err = 'INTERNAL_ERROR'; detail = "modulo no encontrado: $mp" } -Compress))
+        [Console]::Error.WriteLine((ConvertTo-Json @{ ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); ok = $false; code = 70; err = 'INTERNAL_ERROR'; detail = "module not found: $mp" } -Compress))
         exit 70
     }
     Import-Module $mp -Force -DisableNameChecking
@@ -72,13 +72,13 @@ for ($i = 0; $i -lt $argsList.Count; $i++) {
         '^--?[a-zA-Z\-]+=(.+)$' {
             $name = $Matches[0].Substring(2).Split('=')[0]
             $value = $Matches[0].Substring(2).Split('=')[1]
-            if ($name -notin $KnownFlags) { [Console]::Error.WriteLine("WARN: flag desconocido --$name") }
+            if ($name -notin $KnownFlags) { [Console]::Error.WriteLine("WARN: unknown flag --$name") }
             $flags[$name] = $value
             break
         }
         '^--?[a-zA-Z\-]+$' {
             $name = $arg.TrimStart('-')
-            if ($name -notin $KnownFlags) { [Console]::Error.WriteLine("WARN: flag desconocido --$name") }
+            if ($name -notin $KnownFlags) { [Console]::Error.WriteLine("WARN: unknown flag --$name") }
             $flags[$name] = $true
             break
         }
@@ -88,9 +88,9 @@ for ($i = 0; $i -lt $argsList.Count; $i++) {
 
 function Show-Usage {
     Write-Host @'
-cross.ps1 - CLI protocolo Cross-Talk (v0.2, Fase 2)
+cross.ps1 - Cross-Talk protocol CLI (v0.2, Phase 2)
 
-Uso:
+Usage:
   cross health    [--no-cache] [--health-skip]
   cross whoami
   cross sessions  [--directory <path>]
@@ -111,7 +111,7 @@ Uso:
   cross reconcile --msg msg_X --check-file PATH [--expected-token T] [--outbox-file PATH]
   cross aviso-spof [--apply] [--for ses_X] [--outbox-file PATH]
   cross ack --token T --for-msg-id X [--to ses_Y] [--model M]
-  cross nack --token T --for-msg-id X --reason RAZON [--note "..."] [--for-run-id R] [--to ses_Y] [--model M]
+  cross nack --token T --for-msg-id X --reason REASON [--note "..."] [--for-run-id R] [--to ses_Y] [--model M]
   cross resume --to ses_X --task-id TX [--from "checkpoint"] [--text "..."]
   cross restart-task --msg-id X [--to ses_Y] [--text "..."] [--max-attempts N] [--outbox-file PATH]
   cross nudge --to ses_X --task "..." [--token T]
@@ -122,44 +122,44 @@ Uso:
   cross metrics [--since ISO8601] [--until ISO8601] [--by-agent ses_Y] [--log-path PATH]
                 [--json | --human]
 
-Flags globales:
+Global flags:
   --json (default) | --human | --quiet
-  --no-cache        fuerza redeteccion de puerto
-  --health-skip     no verifica /global/health (tests)
-  --port NNNNN      salta deteccion de puerto
-  --password PW     password explicito (preferir env)
-  --config <path>   override de cross.config.json
+  --no-cache        force port re-detection
+  --health-skip     skip /global/health check (tests)
+  --port NNNNN      skip port detection
+  --password PW     explicit password (prefer env)
+  --config <path>   override cross.config.json path
 
-claim/release/done operan sobre idempotencia-procesados.md (append-only).
-validate hace lint de consistencia (outbox vs idempotencia, lease UTC).
-send entrega un EN_VUELO del outbox via prompt_async (ACK/NACK, retries, lease).
-  --no-wait envia y no espera ACK (fire-and-forget, outbox queda EN_VUELO).
-  --ack-timeout 0 equivale a sin ACK (requiere_ack=false, outbox CONFIRMADO); usar --no-wait para lo contrario.
-scan lista los EN_VUELO del outbox y marca los vencidos por lease.
-  --apply renueva el lease de los vencidos (A/B); --quarantine los pasa a QUARANTINE.
-  --retry-auto clasifica cada vencido via diagnose y aplica la accion adecuada
-    (PROVIDER_DOWN -> renovar lease; AGENT_SLEEPING/NO_DATA -> restart-task;
-    CONFIG_ERROR -> quarantine --check-log; NO_ERROR -> aviso al lider).
-    Dry-run por defecto; combinar con --apply para ejecutar. Sin automatizacion
-    ciega: restart-task ya valida MAX_RETRIES_EXCEEDED y lo reporta en 'failed'.
-  Los fallos de escritura (OUTBOX_LOCKED) se reportan en el campo 'failed'.
-poll diagnostica un msg del outbox (ACKED/NACKED/WORKING/QUIETA/TERMINAL).
-  --timeout S es el plazo total del bucle; --interval MS el paso del sondeo.
-status resume outbox + idempotencia + escalated + dlq en un solo vistazo.
-reconcile verifica si un entregable llego al destino buscando su token en el check-file.
-aviso-spof detecta EN_VUELO vencidos; --apply emite AVISO-SPOF (dry-run por defecto).
-ack emite un ACK al destino (formato ACK:<token>:<id>[:modelo], 3-4 segmentos).
-nack emite un NACK con razon cerrada (CAPACITY|TOOL_MISSING|AMBIGUOUS_TASK|PROVIDER_DOWN|OTHER).
-  Formato enriquecido (v1.7): incluye --for-msg-id/--for-run-id para trazabilidad (hasta 7 segmentos).
-resume envia una instruccion de continuacion (NO crea msg_id, NO incrementa attempt).
-restart-task reenvia la tarea con MISMO msg_id (attempt+1; OUTBOX_MSG_NOT_FOUND/MAX_RETRIES_EXCEEDED).
-nudge envia un prompt firme que ignora 'Continue' previos.
-escalate escribe URGENTE en escalated.md (12.6); --apply envia wake-on-write al destino.
-dlq escribe en dlq-mensajes.md (12.7) con flag cerrado y marca el outbox ESTADO=DLQ.
-quarantine escribe DLQ con flag=HUMAN_REVIEW y marca el outbox QUARANTINE; --check-log diagnostica por opencode.log (caso 524).
-diagnose lee opencode.log buscando el destino del msg y clasifica (PROVIDER_DOWN/AGENT_SLEEPING/CONFIG_ERROR).
-metrics resume delivery_log.jsonl (ACK/NACK/TIMEOUT, latencia P50/P95, reintentos,
-  renovaciones de lease, top NACK por razon). Filtros --since/--until/--by-agent.
+claim/release/done operate on idempotencia-procesados.md (append-only).
+validate runs consistency lint (outbox vs idempotencia, lease UTC).
+send delivers an IN_FLIGHT outbox entry via prompt_async (ACK/NACK, retries, lease).
+  --no-wait sends without waiting for ACK (fire-and-forget, outbox remains IN_FLIGHT).
+  --ack-timeout 0 equals no ACK (requires_ack=false, outbox CONFIRMED); use --no-wait for the opposite.
+scan lists IN_FLIGHT outbox entries and marks expired ones by lease.
+  --apply renews the lease for expired entries (A/B); --quarantine moves them to QUARANTINE.
+  --retry-auto classifies each expired entry via diagnose and applies the appropriate action
+    (PROVIDER_DOWN -> renew lease; AGENT_SLEEPING/NO_DATA -> restart-task;
+    CONFIG_ERROR -> quarantine --check-log; NO_ERROR -> notify leader).
+    Dry-run by default; combine with --apply to execute. Not blind automation:
+    restart-task already validates MAX_RETRIES_EXCEEDED and reports it as 'failed'.
+  Write failures (OUTBOX_LOCKED) are reported in the 'failed' field.
+poll diagnoses an outbox msg (ACKED/NACKED/WORKING/QUIET/TERMINAL).
+  --timeout S is the total loop deadline; --interval MS is the polling step.
+status summarizes outbox + idempotencia + escalated + dlq at a glance.
+reconcile checks whether a deliverable reached its destination by searching for its token in the check-file.
+aviso-spof detects expired IN_FLIGHT entries; --apply emits AVISO-SPOF (dry-run by default).
+ack emits an ACK to the destination (format ACK:<token>:<id>[:model], 3-4 segments).
+nack emits a NACK with a closed reason (CAPACITY|TOOL_MISSING|AMBIGUOUS_TASK|PROVIDER_DOWN|OTHER).
+  Enriched format (v1.7): includes --for-msg-id/--for-run-id for traceability (up to 7 segments).
+resume sends a continuation instruction (does NOT create msg_id, does NOT increment attempt).
+restart-task resends the task with the SAME msg_id (attempt+1; OUTBOX_MSG_NOT_FOUND/MAX_RETRIES_EXCEEDED).
+nudge sends a firm prompt that ignores previous 'Continue' messages.
+escalate writes URGENT to escalated.md (12.6); --apply sends wake-on-write to the destination.
+dlq writes to dlq-messages.md (12.7) with a closed flag and marks outbox STATUS=DLQ.
+quarantine writes DLQ with flag=HUMAN_REVIEW and marks outbox QUARANTINE; --check-log diagnoses via opencode.log (case 524).
+diagnose reads opencode.log looking for the msg destination and classifies (PROVIDER_DOWN/AGENT_SLEEPING/CONFIG_ERROR).
+metrics summarizes delivery_log.jsonl (ACK/NACK/TIMEOUT, latency P50/P95, retries,
+  lease renewals, top NACK by reason). Filters --since/--until/--by-agent.
 '@
 }
 
@@ -211,11 +211,11 @@ switch ($Command) {
         if ($overrideModel) { $model = $overrideModel; $source = 'override' }
         if ($overrideRole) { $role = $overrideRole; $source = 'override' }
         if (-not $sid) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'NO_IDENTITY'; detail = 'ni config ni env definen my_session_id' } -Cmd 'whoami'
+            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'NO_IDENTITY'; detail = 'neither config nor env defines my_session_id' } -Cmd 'whoami'
             Out-Result $r 'whoami' -Watch $watch
         }
         $shared = $false
-        if ($source -eq 'config' -and [string]$config.my_session_id -eq [string]$config.lider_session_id) {
+        if ($source -eq 'config' -and [string]$config.my_session_id -eq [string]$config.leader_session_id) {
             $shared = $true
         }
         $r = New-Result -Ok $true -Code 0 -Data @{ session_id = $sid; model = $model; role = $role; identity_source = $source; shared_config = $shared; protocol_version = $config.protocol_version } -Cmd 'whoami'
@@ -249,7 +249,7 @@ switch ($Command) {
         $watch = [System.Diagnostics.Stopwatch]::StartNew()
         $session = [string]$flags['session']
         if (-not $session) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'falta --session ses_X' } -Cmd 'read'
+            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --session ses_X' } -Cmd 'read'
             Out-Result $r 'read' -Watch $watch
         }
         $ep = Resolve-CrossEndpoint -Port $PortArg -Password $PasswordArg -NoCache:$NoCache -HealthSkip:$HealthSkip
@@ -287,7 +287,7 @@ switch ($Command) {
             $key = [string]$flags['get']
             $value = $config.$key
             if ($null -eq $value) {
-                $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = "clave no existe: $key" } -Cmd 'config'
+                $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = "key does not exist: $key" } -Cmd 'config'
                 Out-Result $r 'config' -Watch $watch
                 return
             }
@@ -298,7 +298,7 @@ switch ($Command) {
         if ($flags.Contains('set')) {
             $kv = [string]$flags['set']
             if ($kv -notmatch '^(.+?)=(.+)$') {
-                $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'formato: --set clave=valor' } -Cmd 'config'
+                $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'format: --set key=value' } -Cmd 'config'
                 Out-Result $r 'config' -Watch $watch
                 return
             }
@@ -313,7 +313,7 @@ switch ($Command) {
                 $parsed = 0
                 if ([long]::TryParse($value, [ref]$parsed)) { $value = [int]$parsed }
                 else {
-                    $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = "valor no numerico para clave int: $key=$value" } -Cmd 'config'
+                    $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = "non-numeric value for int key: $key=$value" } -Cmd 'config'
                     Out-Result $r 'config' -Watch $watch; return
                 }
             }
@@ -321,12 +321,12 @@ switch ($Command) {
                 if ($value -in @('true','1','yes')) { $value = $true }
                 elseif ($value -in @('false','0','no')) { $value = $false }
                 else {
-                    $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = "valor no booleano para ${key}: $value" } -Cmd 'config'
+                    $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = "non-boolean value for ${key}: $value" } -Cmd 'config'
                     Out-Result $r 'config' -Watch $watch; return
                 }
             }
             elseif ($currentValue -is [array]) {
-                $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = "no se puede setear array por CLI: $key" } -Cmd 'config'
+                $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = "cannot set array via CLI: $key" } -Cmd 'config'
                 Out-Result $r 'config' -Watch $watch; return
             }
             $validators = @{
@@ -341,9 +341,9 @@ switch ($Command) {
                 $valid = & $validators[$key] $value
                 if (-not $valid) {
                     if ($key -eq 'protocol_version') {
-                        [Console]::Error.WriteLine("WARN: protocol_version=$value (recomendado 1.6.1)")
+                        [Console]::Error.WriteLine("WARN: protocol_version=$value (recommended 1.6.1)")
                     } else {
-                        $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = "valor invalido para ${key}: $value" } -Cmd 'config'
+                        $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = "invalid value for ${key}: $value" } -Cmd 'config'
                         Out-Result $r 'config' -Watch $watch; return
                     }
                 }
@@ -362,7 +362,7 @@ switch ($Command) {
         $watch = [System.Diagnostics.Stopwatch]::StartNew()
         $msg = [string]$flags['msg']
         if (-not $msg) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'falta --msg msg_id' } -Cmd 'claim'
+            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --msg msg_id' } -Cmd 'claim'
             Out-Result $r 'claim' -Watch $watch
         }
         $owner = if ($flags['owner']) { [string]$flags['owner'] } else { [string]$config.my_session_id }
@@ -380,7 +380,7 @@ switch ($Command) {
         $watch = [System.Diagnostics.Stopwatch]::StartNew()
         $msg = [string]$flags['msg']
         if (-not $msg) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'falta --msg msg_id' } -Cmd 'release'
+            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --msg msg_id' } -Cmd 'release'
             Out-Result $r 'release' -Watch $watch
         }
         $owner = if ($flags['owner']) { [string]$flags['owner'] } else { [string]$config.my_session_id }
@@ -399,7 +399,7 @@ switch ($Command) {
         $watch = [System.Diagnostics.Stopwatch]::StartNew()
         $msg = [string]$flags['msg']
         if (-not $msg) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'falta --msg msg_id' } -Cmd 'done'
+            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --msg msg_id' } -Cmd 'done'
             Out-Result $r 'done' -Watch $watch
         }
         $owner = if ($flags['owner']) { [string]$flags['owner'] } else { [string]$config.my_session_id }
@@ -425,32 +425,32 @@ switch ($Command) {
         $watch = [System.Diagnostics.Stopwatch]::StartNew()
         $msg = [string]$flags['msg']
         if (-not $msg) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'falta --msg msg_id' } -Cmd 'send'
+            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --msg msg_id' } -Cmd 'send'
             Out-Result $r 'send' -Watch $watch
         }
         $outboxFile = [string]$flags['outbox-file']
         $entry = Get-OutboxEntry -MsgId $msg -Path $outboxFile
         if (-not $entry) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'OUTBOX_MSG_NOT_FOUND'; detail = "no hay linea en outbox para $msg" } -Cmd 'send'
+            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'OUTBOX_MSG_NOT_FOUND'; detail = "no outbox entry found for $msg" } -Cmd 'send'
             Out-Result $r 'send' -Watch $watch
         }
         if ($entry.estado -eq 'CONFIRMADO') {
-            $r = New-Result -Ok $true -Code 0 -Data @{ msg_id = $msg; outbox_state = 'CONFIRMADO'; already = $true; detail = 'ya entregado' } -Cmd 'send'
+            $r = New-Result -Ok $true -Code 0 -Data @{ msg_id = $msg; outbox_state = 'CONFIRMADO'; already = $true; detail = 'already delivered' } -Cmd 'send'
             Out-Result $r 'send' -Watch $watch
             return
         }
         if ($entry.estado -ne 'EN_VUELO') {
-            $r = New-Result -Ok $false -Code 2 -Data @{ err = 'ESTADO_INVALIDO'; detail = "outbox=$($entry.estado) (se esperaba EN_VUELO)"; msg_id = $msg; outbox_state = $entry.estado } -Cmd 'send'
+            $r = New-Result -Ok $false -Code 2 -Data @{ err = 'ESTADO_INVALIDO'; detail = "outbox=$($entry.estado) (expected EN_VUELO)"; msg_id = $msg; outbox_state = $entry.estado } -Cmd 'send'
             Out-Result $r 'send' -Watch $watch
         }
         $dest = if ($flags['dest']) { [string]$flags['dest'] } else { [string]$entry.dest }
         if (-not $dest) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'falta --dest ses_Y (ni en flag ni en el outbox)' } -Cmd 'send'
+            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --dest ses_Y (neither in flag nor in outbox)' } -Cmd 'send'
             Out-Result $r 'send' -Watch $watch
         }
         $text = if ($flags['text']) { [string]$flags['text'] } else { '' }
         if (-not $text) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'falta --text (cuerpo del mensaje)' } -Cmd 'send'
+            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --text (message body)' } -Cmd 'send'
             Out-Result $r 'send' -Watch $watch
         }
         $token = if ($flags['token']) { [string]$flags['token'] } else { [string]$entry.token }
@@ -512,13 +512,13 @@ switch ($Command) {
                     } elseif ($action -eq 'RESTART_TASK') {
                         $rr = Restart-CrossTask -MsgId $e.msg_id -OutboxPath $outboxFile -MaxAttempts $maxAttempts -Port $PortArg -Password $PasswordArg
                         if ($rr.ok) { $executed = $true }
-                        elseif ($rr.err -eq 'MAX_RETRIES_EXCEEDED') { $err = "MAX_RETRIES_EXCEEDED (attempt=$($rr.attempt)); requiere QUARANTINE manual, no reintentar en bucle" }
+                        elseif ($rr.err -eq 'MAX_RETRIES_EXCEEDED') { $err = "MAX_RETRIES_EXCEEDED (attempt=$($rr.attempt)); requires manual QUARANTINE, do not retry in loop" }
                         else { $err = $rr.err }
                     } elseif ($action -eq 'QUARANTINE') {
                         $qr = Set-CrossQuarantine -MsgId $e.msg_id -Reason "scan --retry-auto: CONFIG_ERROR" -OutboxPath $outboxFile -CheckLog
                         if ($qr.ok) { $executed = $true } else { $err = $qr.err }
                     } elseif ($action -eq 'NOTIFY_LEADER') {
-                        $nl = Write-CrossEscalated -MsgId $e.msg_id -To ([string]$config.lider_session_id) -Reason "scan --retry-auto: sin errores en ventana, verificar ACK/escalada" -RunId ([string]$e.run_id)
+                        $nl = Write-CrossEscalated -MsgId $e.msg_id -To ([string]$config.leader_session_id) -Reason "scan --retry-auto: no errors in window, check ACK/escalation" -RunId ([string]$e.run_id)
                         if ($nl.ok) { $executed = $true } else { $err = $nl.err }
                     }
                 }
@@ -559,7 +559,7 @@ switch ($Command) {
         $watch = [System.Diagnostics.Stopwatch]::StartNew()
         $msgId = if ($flags['msg-id']) { [string]$flags['msg-id'] } else { [string]$flags['msg'] }
         if (-not $msgId) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'falta --msg msg_id' } -Cmd 'poll'
+            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --msg msg_id' } -Cmd 'poll'
             Out-Result $r 'poll' -Watch $watch
         }
         $timeoutSec = if ($flags['timeout']) { [int]$flags['timeout'] } else { [int]$config.default_ack_timeout_s }
@@ -596,7 +596,7 @@ switch ($Command) {
         $msgId = if ($flags['msg-id']) { [string]$flags['msg-id'] } else { [string]$flags['msg'] }
         $checkFile = [string]$flags['check-file']
         if (-not $msgId -or -not $checkFile) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'falta --msg msg_id y --check-file PATH' } -Cmd 'reconcile'
+            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --msg msg_id and --check-file PATH' } -Cmd 'reconcile'
             Out-Result $r 'reconcile' -Watch $watch
         }
         $res = Get-CrossReconcile -MsgId $msgId -CheckFile $checkFile -ExpectedToken ([string]$flags['expected-token']) -OutboxPath ([string]$flags['outbox-file'])
@@ -717,7 +717,7 @@ switch ($Command) {
         Out-Result $r 'metrics' -Watch $watch
     }
     default {
-        $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = "subcomando desconocido: $Command" } -Cmd $Command
+        $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = "unknown subcommand: $Command" } -Cmd $Command
         Out-Result $r $Command
     }
 }

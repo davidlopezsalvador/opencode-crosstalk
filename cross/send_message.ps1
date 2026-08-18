@@ -1,9 +1,9 @@
-# send_message.ps1 - Wrapper de envio de mensajes (Fase 5).
-# Sustituye a whiteboard\send_message.ps1 (HTTP directo) por delegacion al CLI
-# `cross send`, que gestiona outbox.md, audit_log.md, delivery_log.jsonl y reintentos.
-# Firma legacy conservada: -Destino -Texto [-NoReply]. Con -LegacyMode se usa el
-# antiguo HTTP directo (sin outbox/audit/reintentos).
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File send_message.ps1 -Destino ses_X -Texto "..." [-NoReply] [-LegacyMode]
+# send_message.ps1 - Message sending wrapper (Phase 5).
+# Replaces whiteboard\send_message.ps1 (direct HTTP) by delegating to the CLI
+# `cross send`, which manages outbox.md, audit_log.md, delivery_log.jsonl and retries.
+# Legacy signature preserved: -Destino -Texto [-NoReply]. With -LegacyMode the
+# old direct HTTP is used (no outbox/audit/retries).
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File send_message.ps1 -Destino ses_X -Texto "..." [-NoReply] [-LegacyMode]
 
 param(
   [Parameter(Mandatory=$true)][string]$Destino,
@@ -22,9 +22,9 @@ if ($LegacyMode) {
     $logDir = "$env:APPDATA\ai.opencode.desktop\logs"
     $latestLog = Get-ChildItem $logDir | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     $Puerto = ([regex]::Match((Get-Content "$($latestLog.FullName)\main.log" -Raw), "server ready.*url: 'http://127\.0\.0\.1:(\d+)'")).Groups[1].Value
-    if (-not $Puerto) { throw 'No se pudo autodetectar el puerto del servidor' }
+    if (-not $Puerto) { throw 'Could not auto-detect the server port' }
     $Password = $env:OPENCODE_SERVER_PASSWORD
-    if (-not $Password) { throw 'No esta definida OPENCODE_SERVER_PASSWORD en el entorno' }
+    if (-not $Password) { throw 'OPENCODE_SERVER_PASSWORD is not defined in the environment' }
     $payload = @{ parts = @(@{ type = 'text'; text = $Texto }) }
     if ($NoReply) { $payload.noReply = $true }
     $json = $payload | ConvertTo-Json -Depth 4
@@ -36,13 +36,13 @@ if ($LegacyMode) {
     exit 0
 }
 
-if (-not (Test-Path -LiteralPath $Cli)) { throw "cross.ps1 no encontrado: $Cli" }
+if (-not (Test-Path -LiteralPath $Cli)) { throw "cross.ps1 not found: $Cli" }
 Import-Module (Join-Path $MyRoot 'modules\cross-transport.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $MyRoot 'modules\cross-state.psm1') -Force -DisableNameChecking
 $config = Get-CrossConfig
 
 $emisor = [string]$config.my_session_id
-if (-not $emisor) { $emisor = 'lider' }
+if (-not $emisor) { $emisor = 'leader' }
 $msgId = "msg_${emisor}_$(Get-Date -Format 'yyyyMMdd-HHmmss')-" + (Get-Random -Maximum 16777215).ToString('X6')
 $token = 'MSG-' + [System.Guid]::NewGuid().ToString('N').Substring(0, 12)
 $runId = 'RUN-' + [System.Guid]::NewGuid().ToString('N').Substring(0, 8)
@@ -57,7 +57,7 @@ $cliArgs = @('send', "--msg=$msgId", "--dest=$Destino", "--text=$Texto")
 if ($NoReply) { $cliArgs += '--no-wait' }
 if ($Puerto) { $cliArgs += "--port=$Puerto" }
 if ($Password) { $cliArgs += "--password=$Password" }
-[Console]::Error.WriteLine("NOTA: send_message.ps1 delego en cross send (msg_id=$msgId). Outbox/audit/reintentos activos.")
+[Console]::Error.WriteLine("NOTE: send_message.ps1 delegated to cross send (msg_id=$msgId). Outbox/audit/retries active.")
 $raw = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Cli @cliArgs 2>$null | Out-String
 [Console]::WriteLine($raw.Trim())
 exit $LASTEXITCODE

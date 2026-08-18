@@ -314,7 +314,7 @@ function Renew-CrossLease {
     if (-not $entry) { return @{ ok = $false; err = 'OUTBOX_MSG_NOT_FOUND'; detail = $MsgId } }
     $owner = ''
     if ($entry.lease -match '^([^@]+)@') { $owner = $Matches[1] }
-    if (-not $owner) { $owner = 'lider' }
+    if (-not $owner) { $owner = 'leader' }
     $deadline = (Get-Date).ToUniversalTime().AddMinutes($Minutes).ToString('yyyy-MM-ddTHH:mm:ssZ')
     $newLease = "$owner@$deadline"
     $new = [regex]::Replace($entry.raw, 'lease=[^\s|]+', "lease=$newLease")
@@ -521,7 +521,7 @@ function Write-AuditEntry {
         [string]$AuditPath = ''
     )
     $cfg = Get-CrossConfig
-    if (-not $Origen) { $Origen = if ($cfg.my_session_id) { [string]$cfg.my_session_id } else { 'lider' } }
+    if (-not $Origen) { $Origen = if ($cfg.my_session_id) { [string]$cfg.my_session_id } else { 'leader' } }
     $dir = if ($cfg.whiteboard_dir) { [Environment]::ExpandEnvironmentVariables([string]$cfg.whiteboard_dir) } else { Split-Path -Parent (Get-OutboxPath) }
     if (-not $AuditPath) { $AuditPath = Join-Path $dir 'audit_log.md' }
     $ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')

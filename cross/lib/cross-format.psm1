@@ -63,7 +63,7 @@ function Write-OutResult {
         $dur = $Result.duration_ms
         [Console]::WriteLine(("[{0}] cross {1} -> {2} ({3}) in {4}ms" -f $ts, $Cmd, $okText, $code, $dur))
         if ($Result.Contains('messages')) {
-            [Console]::WriteLine(("  {0} mensaje(s) en {1}" -f $Result['messages'].Count, $Result['session']))
+            [Console]::WriteLine(("  {0} message(s) in {1}" -f $Result['messages'].Count, $Result['session']))
             foreach ($m in @($Result['messages'])) {
                 $label = if ($m.role -eq 'user') { '> ' } else { '  ' }
                 [Console]::WriteLine(("  {0}{1}: {2}" -f $label, $m.role, ($m.text -replace "\r?\n", ' | ')))

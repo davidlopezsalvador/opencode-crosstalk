@@ -1,5 +1,5 @@
-# Tests de cross validate (Fase 2, lint de consistencia outbox vs idempotencia).
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-validate.ps1
+# Cross validate tests (Phase 2, lint for outbox vs idempotency consistency).
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-validate.ps1
 $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot '..\cross.ps1'
 
@@ -44,13 +44,13 @@ $goodOutbox = "# OUTBOX
 [2026-08-12T00:00:00Z] OUTBOX | msg_tval_ok | dest=ses_X | run_id=R | token=T | lease=ses_A@2026-08-12T00:03:00Z | ESTADO=CONFIRMADO
 "
 
-Write-Host "== T-validate: consistente =="
+Write-Host "== T-validate: consistent =="
 New-Fixture $goodIdem $goodOutbox
 $r = Run-Validate
-Assert-True ($r.ok -and $r.code -eq 0) 'validate ok en fixture bueno' $r.err
-Assert-True ($r.error_count -eq 0 -and $r.warning_count -eq 0) 'sin errores ni warnings' "$($r.warnings -join '; ')"
+Assert-True ($r.ok -and $r.code -eq 0) 'validate ok on good fixture' $r.err
+Assert-True ($r.error_count -eq 0 -and $r.warning_count -eq 0) 'no errors or warnings' "$($r.warnings -join '; ')"
 
-Write-Host "== T-validate: PROCESADO sin CONFIRMADO = error =="
+Write-Host "== T-validate: PROCESADO without CONFIRMADO = error =="
 $badOutbox = "# OUTBOX
 ## Activo
 [2026-08-12T00:00:00Z] OUTBOX | msg_tval_ok | dest=ses_X | run_id=R | token=T | lease=ses_A@2026-08-12T00:03:00Z | ESTADO=EN_VUELO
@@ -59,9 +59,9 @@ New-Fixture $goodIdem $badOutbox
 $r = Run-Validate
 Assert-True (-not $r.ok -and $r.code -eq 2) 'error -> code 2' $r.code
 Assert-True ($r.error_count -ge 1) 'error_count>=1' $r.error_count
-Assert-True ($r.errors -match 'PROCESADO sin CONFIRMADO') 'msg error PROCESADO sin CONFIRMADO' ($r.errors -join '; ')
+Assert-True ($r.errors -match 'PROCESADO sin CONFIRMADO') 'error msg PROCESADO without CONFIRMADO' ($r.errors -join '; ')
 
-Write-Host "== T-validate: lease sin UTC + msg duplicado = warnings =="
+Write-Host "== T-validate: lease without UTC + duplicate msg = warnings =="
 $warnOutbox = "# OUTBOX
 ## Activo
 [2026-08-12T00:00:00Z] OUTBOX | msg_tval_ok | dest=ses_X | run_id=R | token=T | lease=ses_A@UTC+3min | ESTADO=CONFIRMADO
@@ -69,11 +69,11 @@ $warnOutbox = "# OUTBOX
 "
 New-Fixture $goodIdem $warnOutbox
 $r = Run-Validate
-Assert-True ($r.ok -and $r.error_count -eq 0) 'warnings no rompen ok' $r.err
-Assert-True ($r.warnings -match 'lease sin deadline UTC') 'warn lease sin UTC' ($r.warnings -join '; ')
-Assert-True ($r.warnings -match 'msg_id duplicado') 'warn msg_id duplicado' ($r.warnings -join '; ')
+Assert-True ($r.ok -and $r.error_count -eq 0) 'warnings do not break ok' $r.err
+Assert-True ($r.warnings -match 'lease sin deadline UTC') 'warn lease without UTC' ($r.warnings -join '; ')
+Assert-True ($r.warnings -match 'msg_id duplicado') 'warn duplicate msg_id' ($r.warnings -join '; ')
 
-Write-Host "== T-validate: linea v1.6 en Activo = warning =="
+Write-Host "== T-validate: v1.6 line in Activo = warning =="
 $badIdem = "# IDEMPOTENCIA
 ## Activo
 msg_tval_v16 | 2026-08-11 20:00:00
@@ -81,10 +81,10 @@ msg_tval_ok | 2026-08-12 00:00:00 | M | PROCESADO
 "
 New-Fixture $badIdem $goodOutbox
 $r = Run-Validate
-Assert-True ($r.ok -and $r.error_count -eq 0) 'ok con warning' $r.err
-Assert-True ($r.warnings -match 'linea no v1.6.1') 'warn linea no v1.6.1' ($r.warnings -join '; ')
+Assert-True ($r.ok -and $r.error_count -eq 0) 'ok with warning' $r.err
+Assert-True ($r.warnings -match 'linea no v1.6.1') 'warn non-v1.6.1 line' ($r.warnings -join '; ')
 
-Write-Host "== T-validate (F7): historicos con formato mixto fuera de Activo no generan errores =="
+Write-Host "== T-validate (F7): historical mixed format outside Activo generates no errors =="
 $f7Idem = "# IDEMPOTENCIA
 ## Activo
 msg_tval_ok | 2026-08-12 00:00:00 | M | PROCESADO
@@ -100,21 +100,21 @@ $f7Outbox = "# OUTBOX
 "
 New-Fixture $f7Idem $f7Outbox
 $r = Run-Validate
-Assert-True ($r.ok -and $r.code -eq 0) 'ok con historicos en Historico' $r.err
-Assert-True ($r.error_count -eq 0 -and $r.warning_count -eq 0) 'sin errores ni warnings (historicos ignorados)' "$($r.errors -join '; ') | $($r.warnings -join '; ')"
+Assert-True ($r.ok -and $r.code -eq 0) 'ok with historicals in Historico' $r.err
+Assert-True ($r.error_count -eq 0 -and $r.warning_count -eq 0) 'no errors or warnings (historicals ignored)' "$($r.errors -join '; ') | $($r.warnings -join '; ')"
 
-Write-Host "== T-validate: linea outbox malformada = warning =="
+Write-Host "== T-validate: malformed outbox line = warning =="
 $malOutbox = "# OUTBOX
 ## Activo
-linea sin pipe no v1.6
+line without pipe not v1.6
 [2026-08-12T00:00:00Z] OUTBOX | msg_tval_ok | dest=ses_X | run_id=R | token=T | lease=ses_A@2026-08-12T00:03:00Z | ESTADO=CONFIRMADO
 "
 New-Fixture $goodIdem $malOutbox
 $r = Run-Validate
-Assert-True ($r.ok -and $r.error_count -eq 0) 'ok con outbox malformada' $r.err
-Assert-True ($r.warnings -match 'outbox no v1.6') 'warn outbox malformada' ($r.warnings -join '; ')
+Assert-True ($r.ok -and $r.error_count -eq 0) 'ok with malformed outbox' $r.err
+Assert-True ($r.warnings -match 'outbox no v1.6') 'warn malformed outbox' ($r.warnings -join '; ')
 
-Write-Host "== T-validate: estado no v1.6.1 en idempotencia Activo = warning =="
+Write-Host "== T-validate: non-v1.6.1 state in idempotencia Activo = warning =="
 $badStateIdem = "# IDEMPOTENCIA
 ## Activo
 msg_tval_x | 2026-08-12 00:00:00 | M | ENVIADO
@@ -122,9 +122,9 @@ msg_tval_ok | 2026-08-12 00:00:00 | M | PROCESADO
 "
 New-Fixture $badStateIdem $goodOutbox
 $r = Run-Validate
-Assert-True ($r.ok -and $r.error_count -eq 0) 'ok con estado no v1.6.1' $r.err
-Assert-True ($r.warnings -match 'estado no v1.6.1') 'warn estado no v1.6.1' ($r.warnings -join '; ')
+Assert-True ($r.ok -and $r.error_count -eq 0) 'ok with non-v1.6.1 state' $r.err
+Assert-True ($r.warnings -match 'estado no v1.6.1') 'warn non-v1.6.1 state' ($r.warnings -join '; ')
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

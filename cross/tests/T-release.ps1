@@ -1,5 +1,5 @@
-﻿# Tests de cross release (Fase 2, estado idempotencia).
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-release.ps1
+﻿# Cross release tests (Phase 2, idempotency state).
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-release.ps1
 $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot '..\cross.ps1'
 
@@ -38,44 +38,44 @@ Reset-State
 $A = 'ses_trelease_A'
 $B = 'ses_trelease_B'
 
-Write-Host "== T-release: claim -> release por owner =="
+Write-Host "== T-release: claim -> release by owner =="
 $m1 = 'msg_trelease_1'
 Reset-State
 [void](Invoke-CrossCli @('claim', '--state-file', $script:StateFile, '--msg', $m1, '--owner', $A))
 $r = Get-Json (Invoke-CrossCli @('release', '--state-file', $script:StateFile, '--msg', $m1, '--owner', $A))
-Assert-True ($r.ok) 'release por owner ok' $r.err
+Assert-True ($r.ok) 'release by owner ok' $r.err
 $content = Get-Content -LiteralPath $script:StateFile -Raw
-Assert-True ($content -match [regex]::Escape("SUPERSEDED_BY=$A")) 'SUPERSEDED_BY escrito' ''
-Assert-True ((Count-MsgLines $m1) -eq 2) '2 lineas (claim + release)' (Count-MsgLines $m1)
+Assert-True ($content -match [regex]::Escape("SUPERSEDED_BY=$A")) 'SUPERSEDED_BY written' ''
+Assert-True ((Count-MsgLines $m1) -eq 2) '2 lines (claim + release)' (Count-MsgLines $m1)
 $r = Get-Json (Invoke-CrossCli @('release', '--state-file', $script:StateFile, '--msg', $m1, '--owner', $A))
-Assert-True ($r.ok -and $r.already) 'release repetido idempotente' $r.err
+Assert-True ($r.ok -and $r.already) 'release repeated idempotent' $r.err
 
-Write-Host "== T-release: release de msg no claimed =="
+Write-Host "== T-release: release of unclaimed msg =="
 $m2 = 'msg_trelease_2'
 Reset-State
 $r = Get-Json (Invoke-CrossCli @('release', '--state-file', $script:StateFile, '--msg', $m2, '--owner', $A))
-Assert-True (-not $r.ok -and $r.code -eq 2) 'release sin claim -> code 2' $r.code
+Assert-True (-not $r.ok -and $r.code -eq 2) 'release without claim -> code 2' $r.code
 Assert-True ($r.err -eq 'NOT_CLAIMED') 'err=NOT_CLAIMED' $r.err
 
-Write-Host "== T-release: no-owner requiere --force =="
+Write-Host "== T-release: non-owner requires --force =="
 $m3 = 'msg_trelease_3'
 Reset-State
 [void](Invoke-CrossCli @('claim', '--state-file', $script:StateFile, '--msg', $m3, '--owner', $A))
 $r = Get-Json (Invoke-CrossCli @('release', '--state-file', $script:StateFile, '--msg', $m3, '--owner', $B))
-Assert-True (-not $r.ok -and $r.err -eq 'NOT_OWNER') 'release no-owner -> NOT_OWNER' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'NOT_OWNER') 'release non-owner -> NOT_OWNER' $r.err
 $r = Get-Json (Invoke-CrossCli @('release', '--state-file', $script:StateFile, '--msg', $m3, '--owner', $B, '--force'))
-Assert-True ($r.ok) 'release no-owner --force ok' $r.err
+Assert-True ($r.ok) 'release non-owner --force ok' $r.err
 $content = Get-Content -LiteralPath $script:StateFile -Raw
-Assert-True ($content -match [regex]::Escape("SUPERSEDED_BY=$B")) 'SUPERSEDED_BY=actor escrito' ''
+Assert-True ($content -match [regex]::Escape("SUPERSEDED_BY=$B")) 'SUPERSEDED_BY=actor written' ''
 
-Write-Host "== T-release: release de PROCESADO = error =="
+Write-Host "== T-release: release of PROCESADO = error =="
 $m4 = 'msg_trelease_4'
 Reset-State
 [void](Invoke-CrossCli @('claim', '--state-file', $script:StateFile, '--msg', $m4, '--owner', $A))
 [void](Invoke-CrossCli @('done', '--state-file', $script:StateFile, '--msg', $m4, '--owner', $A))
 $r = Get-Json (Invoke-CrossCli @('release', '--state-file', $script:StateFile, '--msg', $m4, '--owner', $A))
-Assert-True (-not $r.ok -and $r.err -eq 'ALREADY_PROCESSED') 'release de PROCESADO -> ALREADY_PROCESSED' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'ALREADY_PROCESSED') 'release of PROCESADO -> ALREADY_PROCESSED' $r.err
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

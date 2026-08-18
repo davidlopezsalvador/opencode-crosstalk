@@ -1,5 +1,5 @@
-﻿# Tests de cross claim (Fase 2, estado idempotencia).
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-claim.ps1
+﻿# Cross claim tests (Phase 2, idempotency state).
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-claim.ps1
 $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot '..\cross.ps1'
 
@@ -39,36 +39,36 @@ $A = 'ses_tclaim_A'
 $B = 'ses_tclaim_B'
 $m1 = 'msg_tclaim_1'
 
-Write-Host "== T-claim: claim nuevo msg_id =="
+Write-Host "== T-claim: claim new msg_id =="
 Reset-State
 $r = Get-Json (Invoke-CrossCli @('claim', '--state-file', $script:StateFile, '--msg', $m1, '--owner', $A))
-Assert-True ($null -ne $r -and $r.ok) 'claim nuevo ok' $r.err
+Assert-True ($null -ne $r -and $r.ok) 'claim new ok' $r.err
 $content = Get-Content -LiteralPath $script:StateFile -Raw
-Assert-True ($content -match [regex]::Escape("CLAIMED_BY=$A")) 'CLAIMED_BY escrito' ''
-Assert-True ((Count-MsgLines $m1) -eq 1) 'una sola linea para el msg' (Count-MsgLines $m1)
+Assert-True ($content -match [regex]::Escape("CLAIMED_BY=$A")) 'CLAIMED_BY written' ''
+Assert-True ((Count-MsgLines $m1) -eq 1) 'only one line for the msg' (Count-MsgLines $m1)
 
-Write-Host "== T-claim: re-claim por mismo = idempotente =="
+Write-Host "== T-claim: re-claim by same = idempotent =="
 $r = Get-Json (Invoke-CrossCli @('claim', '--state-file', $script:StateFile, '--msg', $m1, '--owner', $A))
-Assert-True ($r.ok -and $r.already) 're-claim mismo ok idempotente' $r.err
-Assert-True ((Count-MsgLines $m1) -eq 1) 'no se duplica la linea' (Count-MsgLines $m1)
+Assert-True ($r.ok -and $r.already) 're-claim same ok idempotent' $r.err
+Assert-True ((Count-MsgLines $m1) -eq 1) 'line not duplicated' (Count-MsgLines $m1)
 
-Write-Host "== T-claim: re-claim por otro = error 2 =="
+Write-Host "== T-claim: re-claim by other = error 2 =="
 $r = Get-Json (Invoke-CrossCli @('claim', '--state-file', $script:StateFile, '--msg', $m1, '--owner', $B))
-Assert-True (-not $r.ok -and $r.code -eq 2) 're-claim otro -> code 2' $r.code
+Assert-True (-not $r.ok -and $r.code -eq 2) 're-claim other -> code 2' $r.code
 Assert-True ($r.err -eq 'ALREADY_CLAIMED_BY_OTHER') 'err=ALREADY_CLAIMED_BY_OTHER' $r.err
 
-Write-Host "== T-claim: claim tras PROCESADO = idempotente =="
+Write-Host "== T-claim: claim after PROCESADO = idempotent =="
 $m2 = 'msg_tclaim_2'
 Reset-State
 [void](Invoke-CrossCli @('claim', '--state-file', $script:StateFile, '--msg', $m2, '--owner', $A))
 [void](Invoke-CrossCli @('done', '--state-file', $script:StateFile, '--msg', $m2, '--owner', $A))
 $r = Get-Json (Invoke-CrossCli @('claim', '--state-file', $script:StateFile, '--msg', $m2, '--owner', $A))
-Assert-True ($r.ok -and $r.already) 'claim tras PROCESADO idempotente' $r.err
+Assert-True ($r.ok -and $r.already) 'claim after PROCESADO idempotent' $r.err
 
-Write-Host "== T-claim: uso =="
+Write-Host "== T-claim: usage =="
 $r = Get-Json (Invoke-CrossCli @('claim'))
-Assert-True (-not $r.ok -and $r.code -eq 64) 'claim sin --msg -> 64' $r.err
+Assert-True (-not $r.ok -and $r.code -eq 64) 'claim without --msg -> 64' $r.err
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

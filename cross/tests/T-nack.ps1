@@ -1,5 +1,5 @@
-# Tests de cross nack (Fase 4b): emision de NACK con razon cerrada y trazabilidad.
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-nack.ps1
+# Cross nack tests (Phase 4b): sending NACK with closed reason and traceability.
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-nack.ps1
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-action.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-transport.psm1') -Force
@@ -25,70 +25,70 @@ $config = Get-Content (Join-Path $PSScriptRoot '..\cross.config.json') -Raw | Co
 $mySession = [string]$config.my_session_id
 $myModel = [string]$config.my_model
 
-Write-Host "== T-nack: NACK 5 segmentos (modelo autoderivado de config, sin ids) =="
+Write-Host "== T-nack: NACK 5 segments (model auto-derived from config, no ids) =="
 New-Fixture
 $r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_x' -Reason 'CAPACITY' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
 Assert-True ($r.ok) 'nack ok' $r.err
-Assert-True ($r.segments -eq 5) '5 segmentos (NACK:token:id:modelo:razon autoderivado)' $r.segments
-Assert-True ($r.nack_text -eq "NACK:T1:${mySession}:${myModel}:CAPACITY") 'texto NACK basico con modelo de config' $r.nack_text
+Assert-True ($r.segments -eq 5) '5 segments (NACK:token:id:model:reason auto-derived)' $r.segments
+Assert-True ($r.nack_text -eq "NACK:T1:${mySession}:${myModel}:CAPACITY") 'basic NACK text with config model' $r.nack_text
 
-Write-Host "== T-nack: NACK 5 segmentos (con modelo) =="
+Write-Host "== T-nack: NACK 5 segments (with model) =="
 New-Fixture
 $r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_x' -Reason 'CAPACITY' -Model 'model-b' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True ($r.segments -eq 5) '5 segmentos (NACK:token:id:modelo:razon)' $r.segments
+Assert-True ($r.segments -eq 5) '5 segments (NACK:token:id:model:reason)' $r.segments
 $p = Parse-CrossAckText $r.nack_text
-Assert-True ($p.nack -and $p.razon -eq 'CAPACITY') 'parser recupera razon' "$($p.razon)"
-Assert-True ($p.emisor -eq $mySession) 'parser recupera emisor' $p.emisor
+Assert-True ($p.nack -and $p.razon -eq 'CAPACITY') 'parser recovers reason' "$($p.razon)"
+Assert-True ($p.emisor -eq $mySession) 'parser recovers sender' $p.emisor
 
-Write-Host "== T-nack: msg_id sin run_id NO enriquece la trama (5 segmentos) =="
+Write-Host "== T-nack: msg_id without run_id does NOT enrich frame (5 segments) =="
 New-Fixture
 $r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_x' -Reason 'TOOL_MISSING' -Model 'model-b' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True ($r.segments -eq 5) '5 segmentos (msg_id solo no enriquece)' $r.segments
+Assert-True ($r.segments -eq 5) '5 segments (msg_id alone does not enrich)' $r.segments
 $p = Parse-CrossAckText $r.nack_text
-Assert-True ($p.razon -eq 'TOOL_MISSING') 'razon en 5 segmentos' $p.razon
+Assert-True ($p.razon -eq 'TOOL_MISSING') 'reason in 5 segments' $p.razon
 
-Write-Host "== T-nack: propagacion nack_msg_id/nack_run_id (7 segmentos, enriquecido) =="
+Write-Host "== T-nack: nack_msg_id/nack_run_id propagation (7 segments, enriched) =="
 New-Fixture
 $r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_orig' -ForRunId 'run_orig' -Reason 'PROVIDER_DOWN' -Model 'model-b' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True ($r.segments -eq 7) '7 segmentos (con msg_id y run_id)' $r.segments
+Assert-True ($r.segments -eq 7) '7 segments (with msg_id and run_id)' $r.segments
 $p = Parse-CrossAckText $r.nack_text
-Assert-True ($p.msg_id -eq 'msg_orig' -and $p.run_id -eq 'run_orig') 'parser extrae msg_id/run_id' "$($p.msg_id)|$($p.run_id)"
-Assert-True ($p.razon -eq 'PROVIDER_DOWN') 'razon propagada' $p.razon
+Assert-True ($p.msg_id -eq 'msg_orig' -and $p.run_id -eq 'run_orig') 'parser extracts msg_id/run_id' "$($p.msg_id)|$($p.run_id)"
+Assert-True ($p.razon -eq 'PROVIDER_DOWN') 'reason propagated' $p.razon
 
-Write-Host "== T-nack: BUG Y - enriquecido SIN --model autoderiva de config (7 segmentos) =="
+Write-Host "== T-nack: BUG Y - enriched WITHOUT --model auto-derives from config (7 segments) =="
 New-Fixture
 $r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_x' -ForRunId 'R1' -Reason 'CAPACITY' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True ($r.ok) 'nack enriquecido ok' $r.err
-Assert-True ($r.segments -eq 7) '7 segmentos (nunca trama ambigua de 6)' $r.segments
-Assert-True ($r.nack_text -eq "NACK:T1:${mySession}:${myModel}:CAPACITY:msg_x:R1") 'modelo autoderivado en posicion 3' $r.nack_text
+Assert-True ($r.ok) 'enriched nack ok' $r.err
+Assert-True ($r.segments -eq 7) '7 segments (never ambiguous 6-segment frame)' $r.segments
+Assert-True ($r.nack_text -eq "NACK:T1:${mySession}:${myModel}:CAPACITY:msg_x:R1") 'model auto-derived in position 3' $r.nack_text
 $p = Parse-CrossAckText $r.nack_text
-Assert-True ($p.razon -eq 'CAPACITY' -and $p.msg_id -eq 'msg_x' -and $p.run_id -eq 'R1' -and $p.modelo -eq $myModel) 'parser sin ambiguedad (razon/modelo/ids correctos)' "$($p.razon)|$($p.modelo)|$($p.msg_id)|$($p.run_id)"
+Assert-True ($p.razon -eq 'CAPACITY' -and $p.msg_id -eq 'msg_x' -and $p.run_id -eq 'R1' -and $p.modelo -eq $myModel) 'parser unambiguous (reason/model/ids correct)' "$($p.razon)|$($p.modelo)|$($p.msg_id)|$($p.run_id)"
 
-Write-Host "== T-nack: razones cerradas =="
+Write-Host "== T-nack: closed reasons =="
 foreach ($razon in @('CAPACITY', 'TOOL_MISSING', 'AMBIGUOUS_TASK', 'PROVIDER_DOWN', 'OTHER')) {
     New-Fixture
     $r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_x' -Reason $razon -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-    Assert-True ($r.ok -and $r.reason -eq $razon) "razon valida $razon" $r.err
+    Assert-True ($r.ok -and $r.reason -eq $razon) "valid reason $razon" $r.err
 }
 
-Write-Host "== T-nack: razon no cerrada -> NACK_REASON_INVALID =="
+Write-Host "== T-nack: non-closed reason -> NACK_REASON_INVALID =="
 New-Fixture
 $r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_x' -Reason 'PORQUE_NO' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True (-not $r.ok -and $r.err -eq 'NACK_REASON_INVALID') 'razon libre rechazada' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'NACK_REASON_INVALID') 'free reason rejected' $r.err
 
-Write-Host "== T-nack: token vacio -> USAGE_ERROR =="
+Write-Host "== T-nack: empty token -> USAGE_ERROR =="
 New-Fixture
 $r = Send-CrossNack -Token '' -ForMsgId 'msg_x' -Reason 'CAPACITY' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'token vacio rechazado' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'empty token rejected' $r.err
 
-Write-Host "== T-nack: audit registrado con razon =="
+Write-Host "== T-nack: audit recorded with reason =="
 New-Fixture
-$r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_x' -Reason 'CAPACITY' -Dest 'ses_Y' -Note 'contexto agotado' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
+$r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_x' -Reason 'CAPACITY' -Dest 'ses_Y' -Note 'context exhausted' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
 $audit = Get-Content -LiteralPath $script:AuditFile -Raw
-Assert-True ($audit -match '\| NACK \| ENVIADO \|') 'audit tipo NACK / ENVIADO' $audit
-Assert-True ($audit -match 'nack razon=CAPACITY') 'audit con razon' $audit
-Assert-True ($audit -match 'msg=msg_x') 'audit con msg_id' $audit
+Assert-True ($audit -match '\| NACK \| ENVIADO \|') 'audit type NACK / SENT' $audit
+Assert-True ($audit -match 'nack razon=CAPACITY') 'audit with reason' $audit
+Assert-True ($audit -match 'msg=msg_x') 'audit with msg_id' $audit
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

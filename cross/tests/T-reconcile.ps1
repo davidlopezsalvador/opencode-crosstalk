@@ -1,5 +1,5 @@
-# Tests de cross reconcile (Fase 4a): verificar que un entregable llego al destino.
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-reconcile.ps1
+# Cross reconcile tests (Phase 4a): verify that a deliverable reached its destination.
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-reconcile.ps1
 $ErrorActionPreference = 'Stop'
 $mod = Join-Path $PSScriptRoot '..\modules\cross-diagnostic.psm1'
 Import-Module $mod -Force
@@ -34,43 +34,43 @@ function Run-Reconcile {
 }
 
 Write-Host "== T-reconcile: CONFIRMED =="
-New-Fixture "linea cualquiera`nEntregado con token abc123 y listo"
+New-Fixture "any line`nDelivered with token abc123 and ready"
 $r = Run-Reconcile
-Assert-True ($r.ok -and $r.verdict -eq 'CONFIRMED') 'token del outbox encontrado -> CONFIRMED' $r.verdict
-Assert-True ($r.expected_token -eq 'abc123') 'token leido del outbox' $r.expected_token
-Assert-True ($r.file.line_found -eq 2) 'linea donde aparece el token' $r.file.line_found
-Assert-True ($r.recommendation -eq 'mark_confirmed') 'recomendacion mark_confirmed' $r.recommendation
+Assert-True ($r.ok -and $r.verdict -eq 'CONFIRMED') 'outbox token found -> CONFIRMED' $r.verdict
+Assert-True ($r.expected_token -eq 'abc123') 'token read from outbox' $r.expected_token
+Assert-True ($r.file.line_found -eq 2) 'line where token appears' $r.file.line_found
+Assert-True ($r.recommendation -eq 'mark_confirmed') 'recommendation mark_confirmed' $r.recommendation
 
 Write-Host "== T-reconcile: AMBIGUOUS =="
-New-Fixture "linea sin el token esperado`notra linea"
+New-Fixture "line without the expected token`nother line"
 $r = Run-Reconcile
-Assert-True ($r.verdict -eq 'AMBIGUOUS') 'check existe pero sin token -> AMBIGUOUS' $r.verdict
-Assert-True ($r.recommendation -eq 'investigate') 'recomendacion investigate' $r.recommendation
+Assert-True ($r.verdict -eq 'AMBIGUOUS') 'check exists but without token -> AMBIGUOUS' $r.verdict
+Assert-True ($r.recommendation -eq 'investigate') 'recommendation investigate' $r.recommendation
 
-Write-Host "== T-reconcile: NOT_FOUND (check no existe) =="
+Write-Host "== T-reconcile: NOT_FOUND (check does not exist) =="
 New-Fixture 'x' $false
 $r = Run-Reconcile
-Assert-True ($r.verdict -eq 'NOT_FOUND') 'check inexistente -> NOT_FOUND' $r.verdict
+Assert-True ($r.verdict -eq 'NOT_FOUND') 'non-existent check -> NOT_FOUND' $r.verdict
 Assert-True (-not $r.file.exists) 'file.exists false' $r.file.exists
 
-Write-Host "== T-reconcile: archivo vacio -> AMBIGUOUS/retry =="
+Write-Host "== T-reconcile: empty file -> AMBIGUOUS/retry =="
 New-Fixture ''
 $r = Run-Reconcile
-Assert-True ($r.verdict -eq 'AMBIGUOUS') 'check vacio -> AMBIGUOUS' $r.verdict
-Assert-True ($r.recommendation -eq 'retry') 'check vacio -> retry (no se escribio)' $r.recommendation
+Assert-True ($r.verdict -eq 'AMBIGUOUS') 'empty check -> AMBIGUOUS' $r.verdict
+Assert-True ($r.recommendation -eq 'retry') 'empty check -> retry (not written)' $r.recommendation
 
 Write-Host "== T-reconcile: expected-token override =="
-New-Fixture "texto con token XYZ999" $true 'abc123'
+New-Fixture "text with token XYZ999" $true 'abc123'
 $r = Run-Reconcile -ExpectedToken 'XYZ999'
-Assert-True ($r.verdict -eq 'CONFIRMED') 'override de token -> CONFIRMED' $r.verdict
-Assert-True ($r.expected_token -eq 'XYZ999') 'expected_token es el override' $r.expected_token
+Assert-True ($r.verdict -eq 'CONFIRMED') 'token override -> CONFIRMED' $r.verdict
+Assert-True ($r.expected_token -eq 'XYZ999') 'expected_token is the override' $r.expected_token
 
-Write-Host "== T-reconcile: outbox sin msg =="
+Write-Host "== T-reconcile: outbox without msg =="
 New-Fixture 'abc123' $true 'abc123' 'msg_otro'
 $r = Run-Reconcile 'msg_no_existe'
-Assert-True ($r.ok -and $r.expected_token -eq '') 'sin entrada outbox, expected_token vacio' $r.expected_token
-Assert-True ($r.verdict -eq 'AMBIGUOUS') 'sin token que buscar, no puede confirmar' $r.verdict
+Assert-True ($r.ok -and $r.expected_token -eq '') 'no outbox entry, expected_token empty' $r.expected_token
+Assert-True ($r.verdict -eq 'AMBIGUOUS') 'no token to search, cannot confirm' $r.verdict
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

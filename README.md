@@ -33,9 +33,9 @@ OpenCode Desktop runs a local HTTP server (`http://127.0.0.1:PORT`) that exposes
 ```json
 {
     "my_session_id": "ses_YOUR_SESSION_ID",
-    "lider_session_id": "ses_LEADER_SESSION_ID",
+    "leader_session_id": "ses_LEADER_SESSION_ID",
     "my_model": "your-model-name",
-    "my_role": "asesor"
+    "my_role": "advisor"
 }
 ```
 
@@ -59,7 +59,7 @@ cross config --list             # show current configuration
 
 cross send --msg MSG_ID --dest ses_Y --text "..."   # send a message
 cross ack --token T --for-msg-id X                   # acknowledge receipt
-cross nack --token T --for-msg-id X --reason RAZON   # reject with reason
+cross nack --token T --for-msg-id X --reason REASON   # reject with reason
 
 cross status                    # overview of outbox + idempotency + DLQ
 cross scan                      # check for expired leases

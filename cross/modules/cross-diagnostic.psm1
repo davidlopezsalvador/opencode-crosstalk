@@ -24,7 +24,7 @@ function Get-DiagPaths {
         idempotencia = Join-Path $dir 'idempotencia-procesados.md'
         audit        = Join-Path $dir 'audit_log.md'
         escalated    = Join-Path $dir 'escalated.md'
-        dlq          = Join-Path $dir 'dlq-mensajes.md'
+        dlq          = Join-Path $dir 'dlq-messages.md'
     }
 }
 
@@ -107,7 +107,7 @@ function Read-DlqLog {
         }
         [void]$items.Add([ordered]@{
             raw = $t; msg_id = $msgId; para = $para; de = $de; reintentos = $reintentos
-            estado = $estado; flag = $flag; resumen = $resumen; unread = ($estado -eq 'SIN RECOGER')
+            estado = $estado; flag = $flag; resumen = $resumen; unread = ($estado -eq 'UNREAD')
         })
     }
     return @($items)
@@ -450,7 +450,7 @@ function Get-CrossAvisoSpof {
     if (-not $EscalatedPath) { $EscalatedPath = (Get-DiagPaths).escalated }
     $cfg = Get-CrossConfig
     if (-not $MySessionId) { $MySessionId = [string]$cfg.my_session_id }
-    $targetSession = if ($cfg.lider_session_id) { [string]$cfg.lider_session_id } else { $MySessionId }
+    $targetSession = if ($cfg.leader_session_id) { [string]$cfg.leader_session_id } else { $MySessionId }
     $vencidos = @(Find-CrossOutboxPending -Path $OutboxPath | Where-Object { $_.vencido })
     $results = New-Object System.Collections.ArrayList
     $written = New-Object System.Collections.ArrayList
@@ -470,12 +470,12 @@ function Get-CrossAvisoSpof {
                 [void]$results.Add([ordered]@{ msg_id = $e.msg_id; dest = $e.dest; action = 'creciendo'; detail = 'lease vencido pero mi sesion crece: esperar' })
             }
         } else {
-            [void]$results.Add([ordered]@{ msg_id = $e.msg_id; dest = $e.dest; action = 'notify-lider'; detail = 'mensaje caido para otra sesion: avisar al lider' })
+            [void]$results.Add([ordered]@{ msg_id = $e.msg_id; dest = $e.dest; action = 'notify-leader'; detail = 'fallen message for another session: notify leader' })
             if ($Apply) {
                 if ($NotifyFn) {
                     [void](& $NotifyFn $e.dest $e.msg_id)
                 } elseif ($Port) {
-                    $body = "AVISO-SPOF | hay un mensaje caido para $($e.dest) | msg_id=$($e.msg_id) | de=$MySessionId"
+                    $body = "AVISO-SPOF | there is a fallen message for $($e.dest) | msg_id=$($e.msg_id) | from=$MySessionId"
                     $payload = @{ parts = @(@{ type = 'text'; text = $body }) } | ConvertTo-Json -Depth 4
                     [void](Invoke-CrossApi -Method 'POST' -Path "/session/$targetSession/prompt_async" -BodyJson $payload -Port $Port -Password $Password)
                 }

@@ -7,7 +7,7 @@ idempotencia-procesados.md
 delivery_log.jsonl
 audit_log.md
 escalated.md
-dlq-mensajes.md
+dlq-messages.md
 task_status.md
 
 # Temporary files

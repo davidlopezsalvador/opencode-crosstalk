@@ -1,5 +1,5 @@
-# Tests de cross quarantine (Fase 4b): DLQ flag=HUMAN_REVIEW + outbox QUARANTINE.
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-quarantine.ps1
+# Cross quarantine tests (Phase 4b): DLQ flag=HUMAN_REVIEW + outbox QUARANTINE.
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-quarantine.ps1
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-action.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-transport.psm1') -Force
@@ -16,7 +16,7 @@ function New-Fixture {
     $dir = Join-Path $env:TEMP ('cross_tquar_' + [System.Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $dir | Out-Null
     $script:AuditFile = Join-Path $dir 'audit_log.md'
-    $script:DlqFile = Join-Path $dir 'dlq-mensajes.md'
+    $script:DlqFile = Join-Path $dir 'dlq-messages.md'
     $script:OutboxFile = Join-Path $dir 'outbox.md'
     $script:LogFile = Join-Path $dir 'opencode.log'
     [System.IO.File]::WriteAllText($script:AuditFile, "# AUDIT`n", (New-Object System.Text.UTF8Encoding($false)))
@@ -30,28 +30,28 @@ function New-Fixture {
     return $dir
 }
 
-Write-Host "== T-quarantine: escribe DLQ flag=HUMAN_REVIEW =="
+Write-Host "== T-quarantine: writes DLQ flag=HUMAN_REVIEW =="
 New-Fixture
-$r = Set-CrossQuarantine -MsgId 'msg_q' -Reason 'no se puede probar seguridad' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
+$r = Set-CrossQuarantine -MsgId 'msg_q' -Reason 'cannot verify safety' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
 Assert-True ($r.ok) 'quarantine ok' $r.err
-Assert-True ($r.dlq_written) 'dlq escrito' $r.dlq_written
+Assert-True ($r.dlq_written) 'dlq written' $r.dlq_written
 $content = Get-Content -LiteralPath $script:DlqFile -Raw
-Assert-True ($content -match 'flag=HUMAN_REVIEW') 'flag HUMAN_REVIEW en dlq' $content
-Assert-True ($content -match "'no se puede probar seguridad'") 'razon como resumen' $content
+Assert-True ($content -match 'flag=HUMAN_REVIEW') 'flag HUMAN_REVIEW in dlq' $content
+Assert-True ($content -match "'cannot verify safety'") 'reason as summary' $content
 
-Write-Host "== T-quarantine: marca outbox QUARANTINE =="
+Write-Host "== T-quarantine: marks outbox QUARANTINE =="
 New-Fixture
 $r = Set-CrossQuarantine -MsgId 'msg_q' -Reason 'r' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
-Assert-True ($r.quarantine) 'outbox marcado QUARANTINE' $r.quarantine
+Assert-True ($r.quarantine) 'outbox marked QUARANTINE' $r.quarantine
 $entry = @(Read-OutboxLog -Path $script:OutboxFile | Where-Object { $_.msg_id -eq 'msg_q' }) | Select-Object -First 1
-Assert-True ($entry.estado -eq 'QUARANTINE') 'ESTADO=QUARANTINE persistido' $entry.estado
+Assert-True ($entry.estado -eq 'QUARANTINE') 'ESTADO=QUARANTINE persisted' $entry.estado
 
-Write-Host "== T-quarantine: msg inexistente -> OUTBOX_MSG_NOT_FOUND =="
+Write-Host "== T-quarantine: non-existent msg -> OUTBOX_MSG_NOT_FOUND =="
 New-Fixture
 $r = Set-CrossQuarantine -MsgId 'msg_no_existe' -Reason 'r' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
-Assert-True (-not $r.ok -and $r.err -eq 'OUTBOX_MSG_NOT_FOUND') 'msg no encontrado' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'OUTBOX_MSG_NOT_FOUND') 'msg not found' $r.err
 
-Write-Host "== T-quarantine: --check-log diagnostica por opencode.log (caso 524) =="
+Write-Host "== T-quarantine: --check-log diagnoses via opencode.log (case 524) =="
 $now = (Get-Date).ToUniversalTime()
 $qts1 = $now.AddMinutes(-2).ToString('yyyy-MM-ddTHH:mm:ssZ')
 $qts2 = $now.AddMinutes(-1).ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -61,24 +61,24 @@ timestamp=$qts2 level=ERROR run=r1 message="stream error 524" session.id=ses_X
 "@
 New-Fixture $logWith524
 $r = Set-CrossQuarantine -MsgId 'msg_q' -Reason 'r' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -LogPath $script:LogFile -AuditPath $script:AuditFile -CheckLog
-Assert-True ($r.log_diagnostic.ok) 'diagnostico ok' $r.log_diagnostic.err
-Assert-True ($r.log_diagnostic.classification -eq 'PROVIDER_DOWN') 'caso 524 -> PROVIDER_DOWN' $r.log_diagnostic.classification
+Assert-True ($r.log_diagnostic.ok) 'diagnosis ok' $r.log_diagnostic.err
+Assert-True ($r.log_diagnostic.classification -eq 'PROVIDER_DOWN') 'case 524 -> PROVIDER_DOWN' $r.log_diagnostic.classification
 $content = Get-Content -LiteralPath $script:DlqFile -Raw
-Assert-True ($content -match 'log=PROVIDER_DOWN') 'clasificacion anexada al resumen' $content
+Assert-True ($content -match 'log=PROVIDER_DOWN') 'classification appended to summary' $content
 
-Write-Host "== T-quarantine: validaciones =="
+Write-Host "== T-quarantine: validations =="
 New-Fixture
 $r = Set-CrossQuarantine -MsgId '' -Reason 'r' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
-Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'sin --msg-id -> USAGE_ERROR' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'no --msg-id -> USAGE_ERROR' $r.err
 $r = Set-CrossQuarantine -MsgId 'msg_q' -Reason '' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
-Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'sin --reason -> USAGE_ERROR' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'no --reason -> USAGE_ERROR' $r.err
 
 Write-Host "== T-quarantine: audit QUARANTINE =="
 New-Fixture
 $r = Set-CrossQuarantine -MsgId 'msg_q' -Reason 'r' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
 $audit = Get-Content -LiteralPath $script:AuditFile -Raw
-Assert-True ($audit -match '\| QUARANTINE \| ESCRITO \|') 'audit tipo QUARANTINE / ESCRITO' $audit
+Assert-True ($audit -match '\| QUARANTINE \| ESCRITO \|') 'audit type QUARANTINE / WRITTEN' $audit
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

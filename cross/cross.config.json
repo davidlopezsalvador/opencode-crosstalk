@@ -1,8 +1,8 @@
 {
     "my_session_id": "",
-    "lider_session_id": "",
+    "leader_session_id": "",
     "my_model": "",
-    "my_role": "lider",
+    "my_role": "leader",
     "whiteboard_dir": "./whiteboard",
     "log_path": "%USERPROFILE%\\.local\\share\\opencode\\log\\opencode.log",
     "desktop_logs_dir": "%APPDATA%\\ai.opencode.desktop\\logs",

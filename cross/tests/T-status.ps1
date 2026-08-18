@@ -1,5 +1,5 @@
-# Tests de cross status (Fase 4a): resumen de outbox + idempotencia + escalated + dlq.
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-status.ps1
+# Cross status tests (Phase 4a): outbox summary + idempotency + escalated + dlq.
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-status.ps1
 $ErrorActionPreference = 'Stop'
 $mod = Join-Path $PSScriptRoot '..\modules\cross-diagnostic.psm1'
 Import-Module $mod -Force
@@ -20,7 +20,7 @@ function New-Fixture {
     $script:OutboxFile = Join-Path $dir 'outbox.md'
     $script:StateFile = Join-Path $dir 'idempotencia-procesados.md'
     $script:EscalatedFile = Join-Path $dir 'escalated.md'
-    $script:DlqFile = Join-Path $dir 'dlq-mensajes.md'
+    $script:DlqFile = Join-Path $dir 'dlq-messages.md'
     $script:AuditFile = Join-Path $dir 'audit_log.md'
     $now = (Get-Date).ToUniversalTime()
     $leaseOk = "ses_X@" + $now.AddMinutes(5).ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -40,13 +40,13 @@ msg_st3 | 2026-08-12 00:00:00 | M | CLAIMED_BY=ses_owner
 msg_st4 | 2026-08-12 00:00:00 | M | SUPERSEDED_BY=ses_Z
 "
     $esc = "# ESCALADO
-URGENTE | para=ses_lider | msg_esc1 | run_id=run_esc | de=ses_A | expira=2026-08-12T00:05:00Z | 'urgente pendiente'
-URGENTE | para=ses_lider | msg_esc2 | run_id=run_esc | de=ses_A | expira=2026-08-12T00:05:00Z | 'urgente ya recibido' RECIBIDO
-AVISO-SPOF | msg_id=msg_spof | para=ses_X | de=ses_A | expira=2026-08-12T00:05:00Z | 'aviso spof'
+URGENTE | para=ses_leader | msg_esc1 | run_id=run_esc | de=ses_A | expira=2026-08-12T00:05:00Z | 'urgent pending'
+URGENTE | para=ses_leader | msg_esc2 | run_id=run_esc | de=ses_A | expira=2026-08-12T00:05:00Z | 'urgent already received' RECIBIDO
+AVISO-SPOF | msg_id=msg_spof | para=ses_X | de=ses_A | expira=2026-08-12T00:05:00Z | 'spof alert'
 "
     $dlq = "# DLQ
-[2026-08-12T00:00:00Z] DLQ | msg_d1 | para=ses_X | de=ses_A | reintentos=3 | ESTADO=SIN RECOGER | flag=HUMAN_REVIEW | 'sin recoger'
-[2026-08-12T00:00:00Z] DLQ | msg_d2 | para=ses_X | de=ses_A | reintentos=2 | ESTADO=RECOGIDO | flag=TECHNICAL | 'recogido'
+[2026-08-12T00:00:00Z] DLQ | msg_d1 | para=ses_X | de=ses_A | reintentos=3 | ESTADO=UNREAD | flag=HUMAN_REVIEW | 'unpicked'
+[2026-08-12T00:00:00Z] DLQ | msg_d2 | para=ses_X | de=ses_A | reintentos=2 | ESTADO=RECOGIDO | flag=TECHNICAL | 'picked up'
 "
     $audit = "# audit_log.md
 | timestamp | origen | destino | token | tipo | estado | nota |
@@ -70,53 +70,53 @@ function Run-Status {
         -SessionFn { param($id) Fake-Session } -SleepFn { param($ms) No-Sleep }
 }
 
-Write-Host "== T-status: resumen global =="
+Write-Host "== T-status: global summary =="
 New-Fixture
 $script:SessState = @{ session_id = 'ses_X'; status = 'idle'; growing = $false; checkable = $true; wait_ms = 0 }
 $r = Run-Status
 Assert-True ($r.ok) 'status ok' ''
-Assert-True ($r.outbox_by_state.CONFIRMADO -eq 1 -and $r.outbox_by_state.EN_VUELO -eq 2 -and $r.outbox_by_state.NACKED -eq 1) 'outbox_by_state cuenta' ($r.outbox_by_state | ConvertTo-Json -Compress)
+Assert-True ($r.outbox_by_state.CONFIRMADO -eq 1 -and $r.outbox_by_state.EN_VUELO -eq 2 -and $r.outbox_by_state.NACKED -eq 1) 'outbox_by_state counts' ($r.outbox_by_state | ConvertTo-Json -Compress)
 $expired = @($r.expired_unmanaged)
-Assert-True ($expired.Count -eq 1 -and $expired[0].msg_id -eq 'msg_st3') 'expired_unmanaged detecta lease vencido' $expired.Count
+Assert-True ($expired.Count -eq 1 -and $expired[0].msg_id -eq 'msg_st3') 'expired_unmanaged detects expired lease' $expired.Count
 
-Write-Host "== T-status: idempotencia y orphaned =="
+Write-Host "== T-status: idempotency and orphaned =="
 Assert-True ($r.idempotencia_by_state.PROCESADO -eq 2 -and $r.idempotencia_by_state.CLAIMED -eq 1) 'idempotencia_by_state' ($r.idempotencia_by_state | ConvertTo-Json -Compress)
 $orphan = @($r.claimed_orphaned)
-Assert-True ($orphan.Count -eq 1 -and $orphan[0].msg_id -eq 'msg_st3') 'claimed_orphaned lista el CLAIMED' $orphan.Count
-Assert-True ($orphan[0].claimer_checked) 'claimer_checked con SessionFn' $orphan[0].claimer_checked
-Assert-True ($orphan[0].claimer_status -eq 'idle') 'O2: claimer_status presente' $orphan[0].claimer_status
+Assert-True ($orphan.Count -eq 1 -and $orphan[0].msg_id -eq 'msg_st3') 'claimed_orphaned lists the CLAIMED' $orphan.Count
+Assert-True ($orphan[0].claimer_checked) 'claimer_checked with SessionFn' $orphan[0].claimer_checked
+Assert-True ($orphan[0].claimer_status -eq 'idle') 'O2: claimer_status present' $orphan[0].claimer_status
 
-Write-Host "== T-status: escalated y aviso-spof =="
+Write-Host "== T-status: escalated and aviso-spof =="
 $escP = @($r.escalated_pending)
-Assert-True ($escP.Count -eq 1 -and $escP[0].msg_id -eq 'msg_esc1') 'escalated_pending solo no recibidos' $escP.Count
-Assert-True ($escP[0].recibido -eq $false) 'campo recibido false' $escP[0].recibido
+Assert-True ($escP.Count -eq 1 -and $escP[0].msg_id -eq 'msg_esc1') 'escalated_pending only unreceived' $escP.Count
+Assert-True ($escP[0].recibido -eq $false) 'recibido field false' $escP[0].recibido
 $avisos = @($r.aviso_spof)
-Assert-True ($avisos.Count -eq 1) 'aviso_spof lista AVISO-SPOF' $avisos.Count
+Assert-True ($avisos.Count -eq 1) 'aviso_spof lists AVISO-SPOF' $avisos.Count
 
 Write-Host "== T-status: dlq =="
 $dU = @($r.dlq_unread)
-Assert-True ($dU.Count -eq 1 -and $dU[0].msg_id -eq 'msg_d1') 'dlq_unread solo SIN RECOGER' $dU.Count
+Assert-True ($dU.Count -eq 1 -and $dU[0].msg_id -eq 'msg_d1') 'dlq_unread only UNREAD' $dU.Count
 Assert-True ($r.dlq_by_flag.HUMAN_REVIEW -eq 1) 'dlq_by_flag HUMAN_REVIEW' ($r.dlq_by_flag | ConvertTo-Json -Compress)
-Assert-True ($r.dlq_by_flag.TECHNICAL -eq $null -and $r.dlq_by_flag.UNKNOWN -eq 1) 'BUG R: flag no cerrado -> UNKNOWN' ($r.dlq_by_flag | ConvertTo-Json -Compress)
+Assert-True ($r.dlq_by_flag.TECHNICAL -eq $null -and $r.dlq_by_flag.UNKNOWN -eq 1) 'BUG R: non-closed flag -> UNKNOWN' ($r.dlq_by_flag | ConvertTo-Json -Compress)
 
-Write-Host "== T-status: filtros por agente y msg =="
+Write-Host "== T-status: agent and msg filters =="
 $rA = Run-Status -Agent 'ses_Y'
-Assert-True ($rA.outbox_by_state.NACKED -eq 1 -and $rA.outbox_by_state.Count -eq 1) 'filtro --agent' ($rA.outbox_by_state | ConvertTo-Json -Compress)
+Assert-True ($rA.outbox_by_state.NACKED -eq 1 -and $rA.outbox_by_state.Count -eq 1) 'filter --agent' ($rA.outbox_by_state | ConvertTo-Json -Compress)
 $rM = Run-Status -MsgId 'msg_st1'
-Assert-True ($rM.outbox_by_state.CONFIRMADO -eq 1 -and $rM.outbox_by_state.Count -eq 1) 'filtro --msg' ($rM.outbox_by_state | ConvertTo-Json -Compress)
+Assert-True ($rM.outbox_by_state.CONFIRMADO -eq 1 -and $rM.outbox_by_state.Count -eq 1) 'filter --msg' ($rM.outbox_by_state | ConvertTo-Json -Compress)
 $rR = Run-Status -RunId 'R2'
-Assert-True ($rR.outbox_by_state.NACKED -eq 1) 'filtro --run-id' ($rR.outbox_by_state | ConvertTo-Json -Compress)
+Assert-True ($rR.outbox_by_state.NACKED -eq 1) 'filter --run-id' ($rR.outbox_by_state | ConvertTo-Json -Compress)
 
-Write-Host "== T-status: lifecycle por msg =="
+Write-Host "== T-status: lifecycle per msg =="
 $rL = Run-Status -MsgId 'msg_st4'
-Assert-True ($null -ne $rL.lifecycle) 'lifecycle presente' ''
-Assert-True (@($rL.lifecycle.outbox).Count -eq 1 -and @($rL.lifecycle.idempotencia).Count -eq 1) 'lifecycle trae outbox+idempotencia' ''
+Assert-True ($null -ne $rL.lifecycle) 'lifecycle present' ''
+Assert-True (@($rL.lifecycle.outbox).Count -eq 1 -and @($rL.lifecycle.idempotencia).Count -eq 1) 'lifecycle brings outbox+idempotencia' ''
 $rL1 = Run-Status -MsgId 'msg_st1'
-Assert-True (@($rL1.lifecycle.audit).Count -eq 1) 'lifecycle.audit solo la linea de msg_st1' @($rL1.lifecycle.audit).Count
-Assert-True (@($rL1.lifecycle.audit) -notmatch 'msg_st1X') 'BUG M: msg_st1X no contamina lifecycle de msg_st1' (@($rL1.lifecycle.audit) -join '; ')
+Assert-True (@($rL1.lifecycle.audit).Count -eq 1) 'lifecycle.audit only msg_st1 line' @($rL1.lifecycle.audit).Count
+Assert-True (@($rL1.lifecycle.audit) -notmatch 'msg_st1X') 'BUG M: msg_st1X does not contaminate msg_st1 lifecycle' (@($rL1.lifecycle.audit) -join '; ')
 $rNo = Run-Status
-Assert-True ($null -eq $rNo.lifecycle) 'sin --msg no hay lifecycle' ''
+Assert-True ($null -eq $rNo.lifecycle) 'without --msg no lifecycle' ''
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

@@ -1,5 +1,5 @@
-# Tests de cross escalate (Fase 4b): URGENTE en escalated.md + wake-on-write.
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-escalate.ps1
+# Cross escalate tests (Phase 4b): URGENTE in escalated.md + wake-on-write.
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-escalate.ps1
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-action.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-transport.psm1') -Force
@@ -23,53 +23,53 @@ function New-Fixture {
 $script:Sent = $null
 function Fake-Send { param([string]$d, [string]$t) $script:Sent = @{ dest = $d; text = $t } }
 
-Write-Host "== T-escalate: linea URGENTE canonica =="
+Write-Host "== T-escalate: canonical URGENTE line =="
 New-Fixture
-$r = Write-CrossEscalated -MsgId 'msg_x' -To 'ses_Y' -Reason 'sin ACK tras reintentos' -RunId 'R1' -EscalatedPath $script:EscalatedFile -AuditPath $script:AuditFile
+$r = Write-CrossEscalated -MsgId 'msg_x' -To 'ses_Y' -Reason 'no ACK after retries' -RunId 'R1' -EscalatedPath $script:EscalatedFile -AuditPath $script:AuditFile
 Assert-True ($r.ok) 'escalate ok' $r.err
-Assert-True ($r.written) 'escrito' $r.written
-Assert-True ($r.line -match '^URGENTE \| para=ses_Y \| msg_id=msg_x \| run_id=R1') 'formato canonico URGENTE' $r.line
-Assert-True ($r.line -match 'de=ses_LEADER') 'de= mi sesion' $r.line
+Assert-True ($r.written) 'written' $r.written
+Assert-True ($r.line -match '^URGENTE \| para=ses_Y \| msg_id=msg_x \| run_id=R1') 'canonical URGENTE format' $r.line
+Assert-True ($r.line -match 'de=ses_LEADER') 'de= my session' $r.line
 Assert-True ($r.line -match 'expira=\d{4}-\d{2}-\d{2}T') 'expira UTC' $r.line
-Assert-True ($r.line -match "'sin ACK tras reintentos'") 'razon entre comillas' $r.line
-Assert-True ($r.notified -eq $false) 'sin --apply no notifica' $r.notified
+Assert-True ($r.line -match "'no ACK after retries'") 'reason in quotes' $r.line
+Assert-True ($r.notified -eq $false) 'without --apply does not notify' $r.notified
 
-Write-Host "== T-escalate: persiste en escalated.md =="
+Write-Host "== T-escalate: persisted in escalated.md =="
 New-Fixture
-$r = Write-CrossEscalated -MsgId 'msg_x' -To 'ses_Y' -Reason 'razon' -EscalatedPath $script:EscalatedFile -AuditPath $script:AuditFile
+$r = Write-CrossEscalated -MsgId 'msg_x' -To 'ses_Y' -Reason 'reason' -EscalatedPath $script:EscalatedFile -AuditPath $script:AuditFile
 $content = Get-Content -LiteralPath $script:EscalatedFile -Raw
-Assert-True ($content -match 'URGENTE \| para=ses_Y') 'URGENTE en archivo' $content
+Assert-True ($content -match 'URGENTE \| para=ses_Y') 'URGENTE in file' $content
 
-Write-Host "== T-escalate: --apply envia wake-on-write =="
+Write-Host "== T-escalate: --apply sends wake-on-write =="
 New-Fixture
-$r = Write-CrossEscalated -MsgId 'msg_x' -To 'ses_Y' -Reason 'razon' -EscalatedPath $script:EscalatedFile -AuditPath $script:AuditFile -Apply -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True ($r.notified -eq $true) 'wake-on-write enviado' $r.notified
-Assert-True ($script:Sent.dest -eq 'ses_Y') 'wake al destino' $script:Sent.dest
-Assert-True ($script:Sent.text -match 'wake-on-write') 'texto wake-on-write' $script:Sent.text
+$r = Write-CrossEscalated -MsgId 'msg_x' -To 'ses_Y' -Reason 'reason' -EscalatedPath $script:EscalatedFile -AuditPath $script:AuditFile -Apply -SendFn { param($d,$t) Fake-Send $d $t }
+Assert-True ($r.notified -eq $true) 'wake-on-write sent' $r.notified
+Assert-True ($script:Sent.dest -eq 'ses_Y') 'wake to destination' $script:Sent.dest
+Assert-True ($script:Sent.text -match 'wake-on-write') 'wake-on-write text' $script:Sent.text
 
-Write-Host "== T-escalate: validaciones =="
+Write-Host "== T-escalate: validations =="
 New-Fixture
 $r = Write-CrossEscalated -MsgId '' -To 'ses_Y' -Reason 'r' -EscalatedPath $script:EscalatedFile -AuditPath $script:AuditFile
-Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'sin --msg-id -> USAGE_ERROR' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'no --msg-id -> USAGE_ERROR' $r.err
 $r = Write-CrossEscalated -MsgId 'msg_x' -To '' -Reason 'r' -EscalatedPath $script:EscalatedFile -AuditPath $script:AuditFile
-Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'sin --to -> USAGE_ERROR' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'no --to -> USAGE_ERROR' $r.err
 $r = Write-CrossEscalated -MsgId 'msg_x' -To 'ses_Y' -Reason '' -EscalatedPath $script:EscalatedFile -AuditPath $script:AuditFile
-Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'sin --reason -> USAGE_ERROR' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'no --reason -> USAGE_ERROR' $r.err
 
-Write-Host "== T-escalate: Read-EscalatedLog parsea msg_id explicito (BUG BB) =="
+Write-Host "== T-escalate: Read-EscalatedLog parses explicit msg_id (BUG BB) =="
 New-Fixture
-[void](Write-CrossEscalated -MsgId 'msg_x' -To 'ses_Y' -Reason 'razon' -EscalatedPath $script:EscalatedFile -AuditPath $script:AuditFile)
+[void](Write-CrossEscalated -MsgId 'msg_x' -To 'ses_Y' -Reason 'reason' -EscalatedPath $script:EscalatedFile -AuditPath $script:AuditFile)
 $parsed = @(Read-EscalatedLog -Path $script:EscalatedFile)
-Assert-True ($parsed.Count -eq 1) 'escalada leida' $parsed.Count
-Assert-True ($parsed[0].msg_id -eq 'msg_x') 'msg_id parseado' $parsed[0].msg_id
+Assert-True ($parsed.Count -eq 1) 'escalation read' $parsed.Count
+Assert-True ($parsed[0].msg_id -eq 'msg_x') 'msg_id parsed' $parsed[0].msg_id
 Assert-True ($parsed[0].para -eq 'ses_Y' -and $parsed[0].kind -eq 'URGENTE') 'para/kind' "$($parsed[0].para)|$($parsed[0].kind)"
 
 Write-Host "== T-escalate: audit ESCALADA =="
 New-Fixture
 $r = Write-CrossEscalated -MsgId 'msg_x' -To 'ses_Y' -Reason 'r' -EscalatedPath $script:EscalatedFile -AuditPath $script:AuditFile
 $audit = Get-Content -LiteralPath $script:AuditFile -Raw
-Assert-True ($audit -match '\| ESCALADA \| ESCRITO \|') 'audit tipo ESCALADA / ESCRITO' $audit
+Assert-True ($audit -match '\| ESCALADA \| ESCRITO \|') 'audit type ESCALADA / WRITTEN' $audit
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

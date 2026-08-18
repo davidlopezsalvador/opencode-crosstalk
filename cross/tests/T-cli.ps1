@@ -1,5 +1,5 @@
-# Tests end-to-end de la CLI cross.ps1 (Fase 1).
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-cli.ps1
+# End-to-end tests for the cross.ps1 CLI (Phase 1).
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-cli.ps1
 $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot '..\cross.ps1'
 
@@ -28,7 +28,7 @@ function Get-Json {
 
 Write-Host "== T-cli: health =="
 $r = Get-Json (Invoke-CrossCli @('health'))
-Assert-True ($null -ne $r) 'health emite JSON' 'null'
+Assert-True ($null -ne $r) 'health emits JSON' 'null'
 Assert-True ($r.ok -eq $true) 'health ok=true' $r.ok
 Assert-True ($r.healthy -eq $true) 'health healthy=true' $r.healthy
 Assert-True ($r.port -gt 0) 'health port>0' $r.port
@@ -43,55 +43,55 @@ Write-Host "== T-cli: sessions =="
 $r = Get-Json (Invoke-CrossCli @('sessions'))
 Assert-True ($r.ok -eq $true) 'sessions ok' $r.ok
 Assert-True ($r.count -ge 1) 'sessions count>=1' $r.count
-Assert-True ($r.sessions.Count -eq $r.count) 'sessions array coincide' $r.sessions.Count
+Assert-True ($r.sessions.Count -eq $r.count) 'sessions array matches' $r.sessions.Count
 
 Write-Host "== T-cli: sessions --directory =="
 $r = Get-Json (Invoke-CrossCli @('sessions', '--directory', $crossRoot))
 Assert-True ($r.ok -eq $true) 'sessions --directory ok' $r.ok
 Assert-True ($r.count -ge 1) 'sessions dir count>=1' $r.count
-Assert-True (@($r.sessions | Where-Object { $_.directory -match 'CROSS' }).Count -eq $r.count) 'todas con dir CROSS' ''
+Assert-True (@($r.sessions | Where-Object { $_.directory -match 'CROSS' }).Count -eq $r.count) 'all with dir CROSS' ''
 
 Write-Host "== T-cli: read =="
 $r = Get-Json (Invoke-CrossCli @('read', '--session', $mySession, '--limit', '2'))
 Assert-True ($r.ok -eq $true) 'read ok' $r.ok
 Assert-True ($r.count -ge 1) 'read count>=1' $r.count
-Assert-True (@($r.messages).Count -eq $r.count) 'read messages coincide' ''
+Assert-True (@($r.messages).Count -eq $r.count) 'read messages match' ''
 Assert-True (@($r.messages | Where-Object { $_.id -match '^msg_' }).Count -eq $r.count) 'ids msg_' ''
 
 Write-Host "== T-cli: read --role=user =="
 $r = Get-Json (Invoke-CrossCli @('read', "--session=$mySession", '--role=user', '--limit=2'))
 Assert-True ($r.ok -eq $true) 'read --role ok' $r.ok
-Assert-True (@($r.messages | Where-Object { $_.role -ne 'user' }).Count -eq 0) 'todos role=user' ''
+Assert-True (@($r.messages | Where-Object { $_.role -ne 'user' }).Count -eq 0) 'all role=user' ''
 
-Write-Host "== T-cli: errores =="
+Write-Host "== T-cli: errors =="
 $r = Get-Json (Invoke-CrossCli @('badcmd'))
-Assert-True ($r.code -eq 64 -and -not $r.ok) 'subcomando desconocido -> 64' $r.err
+Assert-True ($r.code -eq 64 -and -not $r.ok) 'unknown subcommand -> 64' $r.err
 $r = Get-Json (Invoke-CrossCli @('read'))
-Assert-True ($r.code -eq 64) 'read sin --session -> 64' $r.err
+Assert-True ($r.code -eq 64) 'read without --session -> 64' $r.err
 
-Write-Host "== T-cli: salidas humanas =="
+Write-Host "== T-cli: human output =="
 $out = Invoke-CrossCli @('health', '--human')
-Assert-True ($out -match 'cross health -> OK') 'health --human texto' $out
+Assert-True ($out -match 'cross health -> OK') 'health --human text' $out
 $out = Invoke-CrossCli @('sessions', '--human')
-Assert-True ($out -match 'sesion') 'sessions --human lista' $out
+Assert-True ($out -match 'sesion') 'sessions --human list' $out
 
-Write-Host "== T-cli: config --set tipos y validacion =="
+Write-Host "== T-cli: config --set types and validation =="
 $r = Get-Json (Invoke-CrossCli @('config', '--set=port_cache_ttl_s=45'))
 Assert-True ($r.ok -eq $true) 'config --set int ok' $r.ok
 $r = Get-Json (Invoke-CrossCli @('config', '--get=port_cache_ttl_s'))
-Assert-True ($r.value.GetType().Name -notin @('String','string')) 'config set conserva int (no string)' $r.value
+Assert-True ($r.value.GetType().Name -notin @('String','string')) 'config set preserves int (not string)' $r.value
 $null = Invoke-CrossCli @('config', '--set=port_cache_ttl_s=60')
 $r = Get-Json (Invoke-CrossCli @('config', '--set=my_session_id=abc'))
-Assert-True (-not $r.ok -and $r.code -eq 64) 'config set valida ses_ -> 64' $r.detail
+Assert-True (-not $r.ok -and $r.code -eq 64) 'config set validates ses_ -> 64' $r.detail
 
 Write-Host "== T-cli: read 404 =="
 $r = Get-Json (Invoke-CrossCli @('read', '--session=ses_no_existe_xyz', '--limit=1'))
-Assert-True (-not $r.ok -and $r.err -eq 'NOT_FOUND') 'read sesion inexistente NOT_FOUND' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'NOT_FOUND') 'read non-existent session NOT_FOUND' $r.err
 
 Write-Host "== T-cli: read --role case-insensitive =="
 $r = Get-Json (Invoke-CrossCli @('read', "--session=$mySession", '--role=USER', '--limit=2'))
 Assert-True ($r.ok -eq $true) 'read --role=USER ok' $r.ok
-Assert-True (@($r.messages | Where-Object { $_.role.ToLower() -ne 'user' }).Count -eq 0) 'todos role=user (case-insens)' ''
+Assert-True (@($r.messages | Where-Object { $_.role.ToLower() -ne 'user' }).Count -eq 0) 'all role=user (case-insens)' ''
 
 Write-Host "== T-cli: poll/status/reconcile/aviso-spof wiring =="
 $dir = Join-Path $env:TEMP ('cross_tcli4a_' + [System.Guid]::NewGuid().ToString('N'))
@@ -103,26 +103,26 @@ $ob = Join-Path $dir 'outbox.md'
 ", (New-Object System.Text.UTF8Encoding($false)))
 
 $r = Get-Json (Invoke-CrossCli @('poll'))
-Assert-True (-not $r.ok -and $r.code -eq 64 -and $r.err -eq 'USAGE_ERROR') 'poll sin --msg -> USAGE_ERROR' $r.err
+Assert-True (-not $r.ok -and $r.code -eq 64 -and $r.err -eq 'USAGE_ERROR') 'poll without --msg -> USAGE_ERROR' $r.err
 $r = Get-Json (Invoke-CrossCli @('poll', "--msg=msg_w1", '--outbox-file', $ob))
 Assert-True ($r.ok -and $r.diagnostic -eq 'ACKED') 'poll CONFIRMADO -> ACKED' $r.diagnostic
 $r = Get-Json (Invoke-CrossCli @('poll', "--msg-id=msg_w1", '--outbox-file', $ob))
-Assert-True ($r.ok -and $r.diagnostic -eq 'ACKED') 'poll acepta --msg-id' $r.diagnostic
+Assert-True ($r.ok -and $r.diagnostic -eq 'ACKED') 'poll accepts --msg-id' $r.diagnostic
 
 $r = Get-Json (Invoke-CrossCli @('status', '--outbox-file', $ob))
-Assert-True ($r.ok -and $r.outbox_by_state.CONFIRMADO -eq 1) 'status con outbox ok' ($r | ConvertTo-Json -Compress)
+Assert-True ($r.ok -and $r.outbox_by_state.CONFIRMADO -eq 1) 'status with outbox ok' ($r | ConvertTo-Json -Compress)
 
 $r = Get-Json (Invoke-CrossCli @('reconcile', "--msg=msg_w1"))
-Assert-True (-not $r.ok -and $r.code -eq 64) 'reconcile sin --check-file -> 64' $r.detail
+Assert-True (-not $r.ok -and $r.code -eq 64) 'reconcile without --check-file -> 64' $r.detail
 $cf = Join-Path $dir 'check.md'
-[System.IO.File]::WriteAllText($cf, "lista`ncon TK1 aqui", (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText($cf, "line`nwith TK1 here", (New-Object System.Text.UTF8Encoding($false)))
 $r = Get-Json (Invoke-CrossCli @('reconcile', "--msg=msg_w1", '--check-file', $cf, '--outbox-file', $ob))
 Assert-True ($r.ok -and $r.verdict -eq 'CONFIRMED') 'reconcile CONFIRMED' $r.verdict
 
 $r = Get-Json (Invoke-CrossCli @('aviso-spof', '--outbox-file', $ob, '--for', 'ses_X'))
-Assert-True ($r.ok -and $r.dry_run) 'aviso-spof dry_run por defecto' ($r | ConvertTo-Json -Compress)
+Assert-True ($r.ok -and $r.dry_run) 'aviso-spof dry_run by default' ($r | ConvertTo-Json -Compress)
 
-Write-Host "== T-cli: metrics con --log-path y --since invalido =="
+Write-Host "== T-cli: metrics with --log-path and invalid --since =="
 $metricsDir = Join-Path $env:TEMP ('cross_tcli_' + [System.Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $metricsDir | Out-Null
 $mlog = Join-Path $metricsDir 'delivery_log.jsonl'
@@ -134,12 +134,12 @@ $mlog = Join-Path $metricsDir 'delivery_log.jsonl'
 $r = Get-Json (Invoke-CrossCli @('metrics', '--log-path', $mlog))
 Assert-True ($r.ok -and $r.code -eq 0) 'metrics CLI ok' $r.err
 Assert-True ($r.total -eq 3) 'metrics CLI total=3' $r.total
-Assert-True ($r.by_outcome.ACK -eq 2 -and $r.by_outcome.NACK -eq 1) 'ACK=2 NACK=1 (formato historico cuenta ACK)' ($r.by_outcome | ConvertTo-Json -Compress)
+Assert-True ($r.by_outcome.ACK -eq 2 -and $r.by_outcome.NACK -eq 1) 'ACK=2 NACK=1 (historical format counts ACK)' ($r.by_outcome | ConvertTo-Json -Compress)
 $r = Get-Json (Invoke-CrossCli @('metrics', '--log-path', $mlog, '--since', 'ayer'))
-Assert-True (-not $r.ok -and $r.code -eq 64 -and $r.err -eq 'USAGE_ERROR') 'metrics --since invalido -> code 64 USAGE_ERROR' $r.err
+Assert-True (-not $r.ok -and $r.code -eq 64 -and $r.err -eq 'USAGE_ERROR') 'metrics --since invalid -> code 64 USAGE_ERROR' $r.err
 $r = Get-Json (Invoke-CrossCli @('metrics', '--log-path', (Join-Path $env:TEMP 'no_existe_metrics.jsonl')))
-Assert-True (-not $r.ok -and $r.code -eq 64 -and $r.err -eq 'LOG_NOT_FOUND') 'metrics log inexistente -> LOG_NOT_FOUND' $r.err
+Assert-True (-not $r.ok -and $r.code -eq 64 -and $r.err -eq 'LOG_NOT_FOUND') 'metrics non-existent log -> LOG_NOT_FOUND' $r.err
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

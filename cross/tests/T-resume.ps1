@@ -1,5 +1,5 @@
-# Tests de cross resume (Fase 4b): continuacion sin nuevo msg_id ni incremento de attempt.
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-resume.ps1
+# Cross resume tests (Phase 4b): continuation without new msg_id or attempt increment.
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-resume.ps1
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-action.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-transport.psm1') -Force
@@ -28,44 +28,44 @@ $script:Sent = $null
 function Fake-Send { param([string]$d, [string]$t) $script:Sent = @{ dest = $d; text = $t } }
 $script:OutboxBefore = $null
 
-Write-Host "== T-resume: envia instruccion de continuacion =="
+Write-Host "== T-resume: sends continuation instruction =="
 New-Fixture
 $script:OutboxBefore = Get-Content -LiteralPath $script:OutboxFile -Raw
 $r = Send-CrossResume -To 'ses_X' -TaskId 'msg_tx' -From 'diario/15_charla.md:3' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
 Assert-True ($r.ok) 'resume ok' $r.err
-Assert-True ($r.new_msg_id -eq $false) 'NO crea nuevo msg_id' $r.new_msg_id
-Assert-True ($r.prompt -match 'Continúa desde "diario/15_charla.md:3"') 'prompt continua desde checkpoint' $r.prompt
-Assert-True ($r.prompt -match 'msg_tx') 'prompt menciona la tarea' $r.prompt
-Assert-True ($script:Sent.dest -eq 'ses_X') 'destino de envio' $script:Sent.dest
+Assert-True ($r.new_msg_id -eq $false) 'does NOT create new msg_id' $r.new_msg_id
+Assert-True ($r.prompt -match 'Continúa desde "diario/15_charla.md:3"') 'prompt continues from checkpoint' $r.prompt
+Assert-True ($r.prompt -match 'msg_tx') 'prompt mentions the task' $r.prompt
+Assert-True ($script:Sent.dest -eq 'ses_X') 'send destination' $script:Sent.dest
 
-Write-Host "== T-resume: NO toca el outbox (ni attempt) =="
+Write-Host "== T-resume: does NOT touch outbox (nor attempt) =="
 New-Fixture
 $script:OutboxBefore = Get-Content -LiteralPath $script:OutboxFile -Raw
 $r = Send-CrossResume -To 'ses_X' -TaskId 'msg_tx' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
 $after = Get-Content -LiteralPath $script:OutboxFile -Raw
-Assert-True ($after -eq $script:OutboxBefore) 'outbox sin cambios' $after
-Assert-True ($after -match 'attempt=1') 'attempt no incrementado' $after
+Assert-True ($after -eq $script:OutboxBefore) 'outbox unchanged' $after
+Assert-True ($after -match 'attempt=1') 'attempt not incremented' $after
 
-Write-Host "== T-resume: text propio prevalece =="
+Write-Host "== T-resume: custom text prevails =="
 New-Fixture
-$r = Send-CrossResume -To 'ses_X' -TaskId 'msg_tx' -Text 'Retoma el informe en la linea 3 y firmalo.' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True ($r.prompt -eq 'Retoma el informe en la linea 3 y firmalo.') 'text propio usado' $r.prompt
+$r = Send-CrossResume -To 'ses_X' -TaskId 'msg_tx' -Text 'Resume the report at line 3 and sign it.' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
+Assert-True ($r.prompt -eq 'Resume the report at line 3 and sign it.') 'custom text used' $r.prompt
 
-Write-Host "== T-resume: validaciones =="
+Write-Host "== T-resume: validations =="
 New-Fixture
 $r = Send-CrossResume -To '' -TaskId 'msg_tx' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'sin --to -> USAGE_ERROR' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'no --to -> USAGE_ERROR' $r.err
 $r = Send-CrossResume -To 'ses_X' -TaskId '' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'sin --task-id -> USAGE_ERROR' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'no --task-id -> USAGE_ERROR' $r.err
 
 Write-Host "== T-resume: audit RESUME =="
 New-Fixture
 $r = Send-CrossResume -To 'ses_X' -TaskId 'msg_tx' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
 $audit = Get-Content -LiteralPath $script:AuditFile -Raw
-Assert-True ($audit -match '\| RESUME \| ENVIADO \|') 'audit tipo RESUME / ENVIADO' $audit
-Assert-True ($audit -match 'msg=msg_tx') 'audit con task_id' $audit
-Assert-True ($audit -match 'NO nuevo msg_id') 'audit nota no crea msg_id' $audit
+Assert-True ($audit -match '\| RESUME \| ENVIADO \|') 'audit type RESUME / SENT' $audit
+Assert-True ($audit -match 'msg=msg_tx') 'audit with task_id' $audit
+Assert-True ($audit -match 'NO nuevo msg_id') 'audit note no new msg_id' $audit
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

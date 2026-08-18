@@ -1,5 +1,5 @@
-# Tests CLI del subcomando send (Fase 3): validaciones y smoke contra API real.
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-send.ps1
+# CLI tests for the send subcommand (Phase 3): validations and smoke against real API.
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-send.ps1
 $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot '..\cross.ps1'
 
@@ -40,13 +40,13 @@ function Set-Outbox {
     [System.IO.File]::WriteAllText($script:Outbox, $content, (New-Object System.Text.UTF8Encoding($false)))
 }
 
-Write-Host "== T-send: validaciones de uso =="
+Write-Host "== T-send: usage validations =="
 $r = Get-Json (Invoke-CrossCli @('send', '--outbox-file', $script:Outbox))
-Assert-True ($null -ne $r -and -not $r.ok -and $r.code -eq 64 -and $r.err -eq 'USAGE_ERROR') 'send sin --msg -> USAGE_ERROR 64' $r.err
+Assert-True ($null -ne $r -and -not $r.ok -and $r.code -eq 64 -and $r.err -eq 'USAGE_ERROR') 'send without --msg -> USAGE_ERROR 64' $r.err
 
 Set-Outbox 'msg_real'
 $r = Get-Json (Invoke-CrossCli @('send', '--msg=msg_fantasma', '--outbox-file', $script:Outbox, '--text', 'x'))
-Assert-True ($null -ne $r -and -not $r.ok -and $r.err -eq 'OUTBOX_MSG_NOT_FOUND') 'msg inexistente -> OUTBOX_MSG_NOT_FOUND' $r.err
+Assert-True ($null -ne $r -and -not $r.ok -and $r.err -eq 'OUTBOX_MSG_NOT_FOUND') 'non-existent msg -> OUTBOX_MSG_NOT_FOUND' $r.err
 
 Set-Outbox 'msg_c' 'CONFIRMADO'
 $r = Get-Json (Invoke-CrossCli @('send', '--msg=msg_c', '--outbox-file', $script:Outbox, '--text', 'x'))
@@ -54,27 +54,27 @@ Assert-True ($r.ok -and $r.already -and $r.outbox_state -eq 'CONFIRMADO') 'entry
 
 Set-Outbox 'msg_t' 'EN_VUELO'
 $r = Get-Json (Invoke-CrossCli @('send', '--msg=msg_t', '--outbox-file', $script:Outbox))
-Assert-True ($null -ne $r -and -not $r.ok -and $r.err -eq 'USAGE_ERROR' -and $r.detail -match 'text') 'EN_VUELO sin --text -> USAGE_ERROR' $r.detail
+Assert-True ($null -ne $r -and -not $r.ok -and $r.err -eq 'USAGE_ERROR' -and $r.detail -match 'text') 'EN_VUELO without --text -> USAGE_ERROR' $r.detail
 
 Set-Outbox 'msg_d' 'EN_VUELO' '' ''
 $r = Get-Json (Invoke-CrossCli @('send', '--msg=msg_d', '--outbox-file', $script:Outbox, '--text', 'x'))
-Assert-True ($null -ne $r -and -not $r.ok -and $r.err -eq 'USAGE_ERROR' -and $r.detail -match 'dest') 'sin --dest -> USAGE_ERROR' $r.detail
+Assert-True ($null -ne $r -and -not $r.ok -and $r.err -eq 'USAGE_ERROR' -and $r.detail -match 'dest') 'without --dest -> USAGE_ERROR' $r.detail
 
 Set-Outbox 'msg_e' 'EXPIRADO'
 $r = Get-Json (Invoke-CrossCli @('send', '--msg=msg_e', '--outbox-file', $script:Outbox, '--text', 'x', '--dest', 'ses_X'))
 Assert-True ($null -ne $r -and -not $r.ok -and $r.err -eq 'ESTADO_INVALIDO' -and $r.code -eq 2) 'EXPIRADO -> ESTADO_INVALIDO' $r.err
 
-Write-Host "== T-send: smoke contra API real =="
+Write-Host "== T-send: smoke against real API =="
 Set-Outbox 'msg_404' 'EN_VUELO' 'ses_zzz_no_existe_abc'
-$r = Get-Json (Invoke-CrossCli @('send', '--msg=msg_404', '--outbox-file', $script:Outbox, '--text', 'prueba T-send', '--ack-timeout=1'))
-Assert-True ($null -ne $r -and -not $r.ok -and $r.err -eq 'DEST_NOT_FOUND' -and $r.http_status -eq 404) 'dest inexistente -> 404 DEST_NOT_FOUND' ($r | ConvertTo-Json -Compress)
+$r = Get-Json (Invoke-CrossCli @('send', '--msg=msg_404', '--outbox-file', $script:Outbox, '--text', 'T-send test', '--ack-timeout=1'))
+Assert-True ($null -ne $r -and -not $r.ok -and $r.err -eq 'DEST_NOT_FOUND' -and $r.http_status -eq 404) 'non-existent dest -> 404 DEST_NOT_FOUND' ($r | ConvertTo-Json -Compress)
 
-Write-Host "== T-send: send --no-wait acepta flag (404 dest) =="
+Write-Host "== T-send: send --no-wait accepts flag (404 dest) =="
 Set-Outbox 'msg_nw' 'EN_VUELO' 'ses_zzz_no_existe_abc'
 $r = Get-Json (Invoke-CrossCli @('send', '--msg=msg_nw', '--outbox-file', $script:Outbox, '--text', 'x', '--no-wait'))
-Assert-True ($null -ne $r -and -not $r.ok -and $r.err -eq 'DEST_NOT_FOUND') '--no-wait parseado, 404 no cambia' $r.err
+Assert-True ($null -ne $r -and -not $r.ok -and $r.err -eq 'DEST_NOT_FOUND') '--no-wait parsed, 404 unchanged' $r.err
 
-Write-Host "== T-send: scan --apply renueva lease =="
+Write-Host "== T-send: scan --apply renews lease =="
 $past = (Get-Date).ToUniversalTime().AddHours(-1).ToString('yyyy-MM-ddTHH:mm:ssZ')
 $future = (Get-Date).ToUniversalTime().AddHours(1).ToString('yyyy-MM-ddTHH:mm:ssZ')
 function Set-OutboxLines {
@@ -88,28 +88,28 @@ Set-OutboxLines @(
     "[2026-08-12T00:00:00Z] OUTBOX | msg_av2 | dest=ses_X | run_id=R1 | token=T1 | lease=ses_X@$future | ESTADO=EN_VUELO"
 )
 $r = Get-Json (Invoke-CrossCli @('scan', '--outbox-file', $script:Outbox, '--apply'))
-Assert-True ($null -ne $r -and $r.ok -and @($r.applied).Count -eq 1 -and $r.applied[0] -eq 'msg_av1') '--apply renueva solo el vencido' ($r | ConvertTo-Json -Compress)
+Assert-True ($null -ne $r -and $r.ok -and @($r.applied).Count -eq 1 -and $r.applied[0] -eq 'msg_av1') '--apply renews only the expired' ($r | ConvertTo-Json -Compress)
 $line = Get-Content -LiteralPath $script:Outbox | Where-Object { $_ -match 'msg_av1' }
-Assert-True ($line -match 'lease=ses_X@\d{4}-\d{2}-\d{2}T') 'lease de msg_av1 renovado' $line
+Assert-True ($line -match 'lease=ses_X@\d{4}-\d{2}-\d{2}T') 'msg_av1 lease renewed' $line
 
-Write-Host "== T-send: scan --quarantine marca QUARANTINE =="
+Write-Host "== T-send: scan --quarantine marks QUARANTINE =="
 Set-OutboxLines @(
     "[2026-08-12T00:00:00Z] OUTBOX | msg_av3 | dest=ses_X | run_id=R1 | token=T1 | lease=ses_X@$past | ESTADO=EN_VUELO"
 )
 $r = Get-Json (Invoke-CrossCli @('scan', '--outbox-file', $script:Outbox, '--quarantine'))
-Assert-True ($null -ne $r -and $r.ok -and @($r.quarantined).Count -eq 1 -and $r.quarantined[0] -eq 'msg_av3') '--quarantine marca el vencido' ($r | ConvertTo-Json -Compress)
+Assert-True ($null -ne $r -and $r.ok -and @($r.quarantined).Count -eq 1 -and $r.quarantined[0] -eq 'msg_av3') '--quarantine marks the expired' ($r | ConvertTo-Json -Compress)
 $line = Get-Content -LiteralPath $script:Outbox | Where-Object { $_ -match 'msg_av3' }
-Assert-True ($line -match 'ESTADO=QUARANTINE') 'ESTADO=QUARANTINE en outbox' $line
+Assert-True ($line -match 'ESTADO=QUARANTINE') 'ESTADO=QUARANTINE in outbox' $line
 
-Write-Host "== T-send: scan sin flags es diagnostico (no muta) =="
+Write-Host "== T-send: scan without flags is diagnostic (no mutation) =="
 Set-OutboxLines @(
     "[2026-08-12T00:00:00Z] OUTBOX | msg_av4 | dest=ses_X | run_id=R1 | token=T1 | lease=ses_X@$past | ESTADO=EN_VUELO"
 )
 $before = (Get-Content -LiteralPath $script:Outbox -Raw)
 $r = Get-Json (Invoke-CrossCli @('scan', '--outbox-file', $script:Outbox))
 $after = (Get-Content -LiteralPath $script:Outbox -Raw)
-Assert-True ($r.ok -and $r.vencidos -eq 1 -and $before -eq $after) 'scan sin flags no muta' ($r | ConvertTo-Json -Compress)
+Assert-True ($r.ok -and $r.vencidos -eq 1 -and $before -eq $after) 'scan without flags does not mutate' ($r | ConvertTo-Json -Compress)
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

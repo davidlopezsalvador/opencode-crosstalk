@@ -1,7 +1,7 @@
 # cross-action.psm1 - Fase 4b (estados terminales/reactivacion): ack, nack, resume,
 # restart-task, nudge, escalate, dlq, quarantine, diagnose.
-# Escrituras explicitas: outbox (ESTADO/attempt), escalated.md, dlq-mensajes.md, audit_log.md.
-# audit_log.md es multi-writer (emisor + receptor + lider): usa Write-AuditEntry (retry).
+# Explicit writes: outbox (STATUS/attempt), escalated.md, dlq-messages.md, audit_log.md.
+# audit_log.md is multi-writer (sender + receiver + leader): use Write-AuditEntry (retry).
 # Uso (via cross.ps1): cross ack|nack|resume|restart-task|nudge|escalate|dlq|quarantine|diagnose
 Set-StrictMode -Version 2.0
 
@@ -22,14 +22,14 @@ function Get-CrossActionPaths {
         outbox       = Join-Path $dir 'outbox.md'
         audit        = Join-Path $dir 'audit_log.md'
         escalated    = Join-Path $dir 'escalated.md'
-        dlq          = Join-Path $dir 'dlq-mensajes.md'
+        dlq          = Join-Path $dir 'dlq-messages.md'
         log          = if ($cfg.log_path) { [Environment]::ExpandEnvironmentVariables([string]$cfg.log_path) } else { '' }
     }
 }
 
 function Get-CrossMyId {
     $cfg = Get-CrossConfig
-    return $(if ($cfg.my_session_id) { [string]$cfg.my_session_id } else { 'lider' })
+    return $(if ($cfg.my_session_id) { [string]$cfg.my_session_id } else { 'leader' })
 }
 
 function Get-CrossMyModel {
@@ -68,7 +68,7 @@ function Send-CrossAck {
         }
         $sent = $true
     }
-    $audit = Write-AuditEntry -MsgId $ForMsgId -Dest $Dest -Token $Token -Tipo 'ACK' -Estado 'ENVIADO' -Nota 'ack emitido por el lider' -AuditPath $AuditPath
+    $audit = Write-AuditEntry -MsgId $ForMsgId -Dest $Dest -Token $Token -Tipo 'ACK' -Estado 'ENVIADO' -Nota 'ack emitted by leader' -AuditPath $AuditPath
     return @{ ok = $true; ack_text = $ackText; segments = @($ackText -split ':').Count; to = $Dest; sent = $sent; audit_ok = $audit.ok }
 }
 
@@ -306,7 +306,7 @@ function Write-CrossDlq {
     if (-not $To) { $To = if ($entry) { [string]$entry.dest } else { '' } }
     if (-not $Retries) { $Retries = if ($entry) { [string][Math]::Max(0, [int]$entry.attempt - 1) } else { '0' } }
     $ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    $line = "[$ts] DLQ | $MsgId | para=$To | de=$myId | reintentos=$Retries | ESTADO=SIN RECOGER | flag=$Flag"
+    $line = "[$ts] DLQ | $MsgId | to=$To | from=$myId | retries=$Retries | STATUS=UNREAD | flag=$Flag"
     if ($Summary) { $line += " | '$Summary'" }
     $res = Add-CrossLogLine -Path $DlqPath -Line $line
     if (-not $res.ok) { return @{ ok = $false; err = $res.err; detail = $res.detail } }

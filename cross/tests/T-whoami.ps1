@@ -1,6 +1,6 @@
-# T-whoami.ps1 - Tests del subcomando whoami (fix F3: identidad real por config/override).
-# Verifica que whoami reporte la identidad correcta: config compartida (shared_config),
-# overrides explicitos (--session-id/--model/--role) y error NO_IDENTITY sin config.
+# T-whoami.ps1 - Tests for the whoami subcommand (fix F3: real identity via config/override).
+# Verifies that whoami reports the correct identity: shared config (shared_config),
+# explicit overrides (--session-id/--model/--role) and NO_IDENTITY error without config.
 $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot '..\cross.ps1'
 
@@ -20,7 +20,7 @@ function Get-TmpConfig {
     param([string]$Dir, [string]$Sid, [string]$Lider, [string]$Model, [string]$Role)
     $cfg = [ordered]@{
         my_session_id = $Sid
-        lider_session_id = $Lider
+        leader_session_id = $Lider
         my_model = $Model
         my_role = $Role
         whiteboard_dir = (Join-Path $Dir 'whiteboard')
@@ -40,51 +40,51 @@ function Get-TmpConfig {
 $tmp = Join-Path $env:TEMP ('cross_twhoami_' + [System.Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmp | Out-Null
 
-Write-Host "== T-whoami: config compartida (my_session_id == lider) =="
-$cfgShared = Get-TmpConfig $tmp 'ses_lider_abc' 'ses_lider_abc' 'leader-model' 'lider'
+Write-Host "== T-whoami: shared config (my_session_id == leader) =="
+$cfgShared = Get-TmpConfig $tmp 'ses_leader_abc' 'ses_leader_abc' 'leader-model' 'leader'
 $raw = Invoke-CrossCli @('whoami', "--config=$cfgShared")
 $j = $null
 try { $j = ($raw | ConvertFrom-Json) } catch { }
-Assert-True ($null -ne $j -and $j.ok) 'whoami con config -> ok' $raw
-Assert-True ($null -ne $j -and $j.session_id -eq 'ses_lider_abc') 'session_id de config' "$($j.session_id)"
-Assert-True ($null -ne $j -and $j.model -eq 'leader-model') 'model de config' "$($j.model)"
-Assert-True ($null -ne $j -and $j.role -eq 'lider') 'role de config' "$($j.role)"
+Assert-True ($null -ne $j -and $j.ok) 'whoami with config -> ok' $raw
+Assert-True ($null -ne $j -and $j.session_id -eq 'ses_leader_abc') 'session_id from config' "$($j.session_id)"
+Assert-True ($null -ne $j -and $j.model -eq 'leader-model') 'model from config' "$($j.model)"
+Assert-True ($null -ne $j -and $j.role -eq 'leader') 'role from config' "$($j.role)"
 Assert-True ($null -ne $j -and $j.identity_source -eq 'config') 'identity_source=config' "$($j.identity_source)"
-Assert-True ($null -ne $j -and $j.shared_config) 'shared_config=true cuando my_session_id==lider' ''
+Assert-True ($null -ne $j -and $j.shared_config) 'shared_config=true when my_session_id==leader' ''
 
-Write-Host "== T-whoami: override completo (identidad del asesor) =="
-$raw = Invoke-CrossCli @('whoami', "--config=$cfgShared", '--session-id=ses_asesor_xyz', '--model=model-a', '--role=asesor')
+Write-Host "== T-whoami: full override (advisor identity) =="
+$raw = Invoke-CrossCli @('whoami', "--config=$cfgShared", '--session-id=ses_advisor_xyz', '--model=model-a', '--role=advisor')
 $j = $null
 try { $j = ($raw | ConvertFrom-Json) } catch { }
-Assert-True ($null -ne $j -and $j.ok) 'whoami con override -> ok' $raw
-Assert-True ($null -ne $j -and $j.session_id -eq 'ses_asesor_xyz') 'override session_id' "$($j.session_id)"
+Assert-True ($null -ne $j -and $j.ok) 'whoami with override -> ok' $raw
+Assert-True ($null -ne $j -and $j.session_id -eq 'ses_advisor_xyz') 'override session_id' "$($j.session_id)"
 Assert-True ($null -ne $j -and $j.model -eq 'model-a') 'override model' "$($j.model)"
-Assert-True ($null -ne $j -and $j.role -eq 'asesor') 'override role' "$($j.role)"
+Assert-True ($null -ne $j -and $j.role -eq 'advisor') 'override role' "$($j.role)"
 Assert-True ($null -ne $j -and $j.identity_source -eq 'override') 'identity_source=override' "$($j.identity_source)"
 Assert-True ($null -ne $j -and -not $j.shared_config) 'override -> shared_config=false' ''
 
-Write-Host "== T-whoami: override parcial (solo session-id hereda model/role) =="
-$raw = Invoke-CrossCli @('whoami', "--config=$cfgShared", '--session-id=ses_asesor_xyz')
+Write-Host "== T-whoami: partial override (only session-id inherits model/role) =="
+$raw = Invoke-CrossCli @('whoami', "--config=$cfgShared", '--session-id=ses_advisor_xyz')
 $j = $null
 try { $j = ($raw | ConvertFrom-Json) } catch { }
-Assert-True ($null -ne $j -and $j.ok -and $j.session_id -eq 'ses_asesor_xyz' -and $j.identity_source -eq 'override') 'override parcial -> session_id del override' "$($j.session_id)|$($j.identity_source)"
-Assert-True ($null -ne $j -and $j.model -eq 'leader-model' -and $j.role -eq 'lider') 'override parcial -> hereda model/role de config' "$($j.model)|$($j.role)"
+Assert-True ($null -ne $j -and $j.ok -and $j.session_id -eq 'ses_advisor_xyz' -and $j.identity_source -eq 'override') 'partial override -> session_id from override' "$($j.session_id)|$($j.identity_source)"
+Assert-True ($null -ne $j -and $j.model -eq 'leader-model' -and $j.role -eq 'leader') 'partial override -> inherits model/role from config' "$($j.model)|$($j.role)"
 
-Write-Host "== T-whoami: config propia (my_session_id != lider) no es shared =="
-$cfgPropia = Get-TmpConfig $tmp 'ses_asesor_xyz' 'ses_lider_abc' 'model-b' 'asesor'
+Write-Host "== T-whoami: own config (my_session_id != leader) is not shared =="
+$cfgPropia = Get-TmpConfig $tmp 'ses_advisor_xyz' 'ses_leader_abc' 'model-b' 'advisor'
 $raw = Invoke-CrossCli @('whoami', "--config=$cfgPropia")
 $j = $null
 try { $j = ($raw | ConvertFrom-Json) } catch { }
-Assert-True ($null -ne $j -and $j.ok -and $j.session_id -eq 'ses_asesor_xyz' -and $j.identity_source -eq 'config') 'whoami config propia -> ok' $raw
-Assert-True ($null -ne $j -and -not $j.shared_config) 'config propia -> shared_config=false' ''
+Assert-True ($null -ne $j -and $j.ok -and $j.session_id -eq 'ses_advisor_xyz' -and $j.identity_source -eq 'config') 'whoami own config -> ok' $raw
+Assert-True ($null -ne $j -and -not $j.shared_config) 'own config -> shared_config=false' ''
 
-Write-Host "== T-whoami: NO_IDENTITY sin config =="
+Write-Host "== T-whoami: NO_IDENTITY without config =="
 $cfgVacia = Get-TmpConfig $tmp '' '' '' ''
 $raw = Invoke-CrossCli @('whoami', "--config=$cfgVacia")
 $j = $null
 try { $j = ($raw | ConvertFrom-Json) } catch { }
-Assert-True ($null -ne $j -and -not $j.ok -and $j.err -eq 'NO_IDENTITY') 'sin identidad -> NO_IDENTITY' $raw
+Assert-True ($null -ne $j -and -not $j.ok -and $j.err -eq 'NO_IDENTITY') 'no identity -> NO_IDENTITY' $raw
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

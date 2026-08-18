@@ -1,31 +1,30 @@
-# CROSS_WINDOWS — Pitfalls de PowerShell 5.1 / Windows
+# CROSS_WINDOWS — Pitfalls of PowerShell 5.1 / Windows
 
-Pitfalls específicos de entorno (Windows + PowerShell 5.1), consolidados el
-2026-08-11 tras revisión externa (separados de `CROSS_TALK.md` el 2026-08-11
-para que ese documento contenga solo reglas de protocolo). Son limitaciones de
-la plataforma, NO del protocolo. La sección 11 de `CROSS_TALK.md` los cita
-(ítems 1, 2, 7, 8) y delega el detalle aquí.
+Environment-specific pitfalls (Windows + PowerShell 5.1), consolidated on
+2026-08-11 after an external review (separated from `CROSS_TALK.md` on 2026-08-11
+so that document contains only protocol rules). They are platform limitations,
+NOT protocol limitations. Section 11 of `CROSS_TALK.md` references them
+(items 1, 2, 7, 8) and delegates the details here.
 
-1. **JSON corrupto / HTTP 500** al usar `-d '...'` inline en PowerShell: el
-   quoting de PS 5.1 corrompe el body. Usar archivo temporal + `--data-binary`
-   (sección 4) o el wrapper `send_message.ps1` (4e).
-2. **Mojibake** (acentos como `?`): la salida de la API se lee en la cp850 de
-   PS 5.1 aunque el body sea UTF-8. Enviar en ASCII plano y corregir al
-   integrar; o leer con `HttpClient`/`Invoke-RestMethod` que decodifican UTF-8
-   correctamente.
-3. **BOM en JSON → HTTP 500** (v1.5, probado 2026-08-10): generar el payload
-   con `[System.Text.Encoding]::UTF8` (que escribe BOM) provoca `HTTP 500
-   Unexpected server error`. Usar UTF-8 sin BOM o ASCII (sección 4).
-4. **Rutas `/tmp/`:** no existen en Windows; usar `$env:TEMP`.
-5. **`&&` en PowerShell 5.1:** no existe; usar `;` o comandos separados.
-6. **`Add-Content` con escritura concurrente** (hallazgo T10, 2026-08-11):
-   es atómico (todo-o-nada) pero usa bloqueo exclusivo por llamada; dos
-   procesos a la vez → el segundo recibe `IOException` y pierde su línea
-   silenciosamente. Por eso el outbox lo actualiza SOLO el emisor (12.2); si
-   se necesitara escritura concurrente real, usar append con reintento con
-   backoff o archivo de lock.
-7. **Interpolación `${var}:`** en strings de PowerShell: `"${var}:foo"` se
-   interpreta como variable de scope `${var:}`; escapar como `` `${var}`:foo ``.
-8. **Stub de Python de Windows Store:** `python` en el PATH de un shell normal
-   es el alias de la Store y NO ejecuta; el real está en
-   `AppData\Local\Python\pythoncore-3.11-64` (8.2). Indicar rutas completas.
+1. **Corrupted JSON / HTTP 500** when using `-d '...'` inline in PowerShell: PS
+   5.1 quoting corrupts the body. Use a temporary file + `--data-binary`
+   (section 4) or the `send_message.ps1` wrapper (4e).
+2. **Mojibake** (accents like `?`): API output is read in PS 5.1's cp850 even
+   when the body is UTF-8. Send as plain ASCII and fix on integration; or read
+   with `HttpClient`/`Invoke-RestMethod` which decode UTF-8 correctly.
+3. **BOM in JSON → HTTP 500** (v1.5, tested 2026-08-10): generating the payload
+   with `[System.Text.Encoding]::UTF8` (which writes a BOM) causes
+   `HTTP 500 Unexpected server error`. Use UTF-8 without BOM or ASCII (section 4).
+4. **`/tmp/` paths:** do not exist on Windows; use `$env:TEMP`.
+5. **`&&` in PowerShell 5.1:** does not exist; use `;` or separate commands.
+6. **`Add-Content` with concurrent writes** (finding T10, 2026-08-11): it is
+   atomic (all-or-nothing) but uses exclusive locking per call; two processes
+   writing at the same time → the second receives `IOException` and silently
+   loses its line. That is why the outbox is updated ONLY by the sender (12.2);
+   if real concurrent writes were needed, use append with retry and backoff or
+   a lock file.
+7. **`${var}:` interpolation** in PowerShell strings: `"${var}:foo"` is
+   interpreted as a scoped variable `${var:}`; escape as `` `${var}`:foo ``.
+8. **Windows Store Python stub:** `python` on the PATH in a normal shell is the
+   Store alias and does NOT run; the real executable is at
+   `AppData\Local\Python\pythoncore-3.11-64` (8.2). Specify full paths.

@@ -1,62 +1,62 @@
-# Cross-Talk entre sesiones de OpenCode Desktop
+# Cross-Talk between OpenCode Desktop sessions
 
-Documento de referencia para que cualquier agente de este proyecto pueda
-comunicarse con otros chats/sesiones abiertos en el mismo proyecto.
+Reference document so that any agent in this project can communicate
+with other open chats/sessions in the same project.
 
-> **Versión actual: v1.6.1 (2026-08-11).** Correcciones de semántica tras
-> revisión externa (external-reviewer + 4 asesores + external-reviewer) sobre el protocolo anti-sueño
-> v1.6 (sección 12): sobre de mensaje estándar con `msg_id`, outbox durable,
-> ACK en frontera de turno (ventana de decisión 120s, sin backoff), presencia
-> pasiva, lease con sucesor, escalada, DLQ, idempotencia (at-least-once +
-> dedupe con estado CLAIMED), circuit breaker A/B/C y scan de recuperación
-> RETRY/RESUME/RECONCILE/QUARANTINE con diagnóstico por log del servidor.
-> v1.6.1 aclara identidades (task_id/run_id/msg_id/attempt/session_id), separa
-> RESUME (`sigue`) de RETRY, añade AVISO-SPOF (detección pasiva del SPOF del
-> líder, sin reelección), NACK explícito (7.5), handshake de protocolo
-> (ACK-PROTOCOLO, 4d), idempotencia append-only con estado CLAIMED (12.8),
-> flag en DLQ (12.7) y bloque canónico de reglas críticas (4f).
-> Regla de oro: SIEMPRE `prompt_async` sin `noReply` para despertar (5.1, 12).
+> **Current version: v1.6.1 (2026-08-11).** Semantic corrections after
+> external review (external-reviewer + 4 advisors + external-reviewer) of the anti-sleep
+> protocol v1.6 (section 12): about standard message with `msg_id`, durable outbox,
+> ACK at turn boundary (decision window 120s, no backoff), passive
+> presence, lease with successor, escalation, DLQ, idempotency (at-least-once +
+> dedupe with CLAIMED state), circuit breaker A/B/C and recovery scan
+> RETRY/RESUME/RECONCILE/QUARANTINE with server log diagnostics.
+> v1.6.1 clarifies identities (task_id/run_id/msg_id/attempt/session_id), separates
+> RESUME (`sigue`) from RETRY, adds AVISO-SPOF (passive detection of the leader's
+> SPOF, no re-election), explicit NACK (7.5), protocol handshake
+> (ACK-PROTOCOLO, 4d), append-only idempotency with CLAIMED state (12.8),
+> flag in DLQ (12.7) and canonical critical rules block (4f).
+> Golden rule: ALWAYS `prompt_async` without `noReply` to wake up (5.1, 12).
 >
-> El historial de versiones y descubrimientos está en **`CHANGELOG.md`**
-> (v1.1 → v1.6.1), los pitfalls de Windows en **`CROSS_WINDOWS.md`**. Este
-> archivo contiene SOLO las reglas vigentes.
+> Version history and discoveries are in **`CHANGELOG.md`**
+> (v1.1 → v1.6.1), Windows pitfalls in **`CROSS_WINDOWS.md`**. This
+> file contains ONLY the current rules.
 
-## Contexto
+## Context
 
-OpenCode Desktop ejecuta un servidor HTTP local (`http://127.0.0.1:PUERTO`)
-que expone la API de OpenCode. Cada chat abierto en la aplicación es una
-**sesión** con un identificador único (`ses_...`). Cualquier agente con acceso
-al shell (por ejemplo el agente `build`) puede usar esa API para:
+OpenCode Desktop runs a local HTTP server (`http://127.0.0.1:PORT`)
+that exposes the OpenCode API. Each chat open in the application is a
+**session** with a unique identifier (`ses_...`). Any agent with access
+to the shell (e.g. the `build` agent) can use that API to:
 
-1. Listar las sesiones del proyecto.
-2. Leer los mensajes de una sesión.
-3. **Enviar un mensaje a otra sesión** (con o sin esperar su respuesta).
-4. **Verificar** que la otra sesión respondió (el mensaje queda en el historial).
+1. List project sessions.
+2. Read messages from a session.
+3. **Send a message to another session** (with or without waiting for a reply).
+4. **Verify** that the other session replied (the message is stored in the history).
 
-La comunicación entre sesiones del mismo proyecto se hace directamente por
-HTTP: no hace falta ningún complemento adicional, solo conocer el puerto del
-servidor y las credenciales.
+Communication between sessions of the same project is done directly via
+HTTP: no additional plugin is needed, just knowing the server port and
+credentials.
 
-> **Procedimiento verificado** (pruebas reales del 2026-08-10): una sesión
-> envió un mensaje a otra del mismo proyecto, la segunda leyó este documento,
-> respondió de vuelta usando el mismo mecanismo, y el mensaje llegó y quedó
-> persistido en la sesión de origen.
+> **Verified procedure** (real tests from 2026-08-10): one session
+> sent a message to another session in the same project, the second read this document,
+> replied back using the same mechanism, and the message arrived and was
+> persisted in the originating session.
 
-## 1. Detectar credenciales del servidor (AUTODETECCIÓN OBLIGATORIA)
+## 1. Detect server credentials (MANDATORY AUTO-DETECTION)
 
-> **REGLA (v1.4, consenso 2026-08-10):** autodetecta el puerto y toma el
-> password del entorno **inmediatamente antes de CADA envío**, nunca de una
-> tarea anterior y **nunca hardcodeados** en un script. Si un script tiene
-> `$port = "56678"` (u otro valor fijo) o un password pegado literalmente,
-> ese script está MAL: al reiniciar la aplicación el puerto cambia y el
-> password se rota, y los mensajes enviados con valores viejos **no llegan**
-> (se pierden en silencio o devuelven error). Cada modelo que envía mensajes
-> es responsable de actualizar su snippet para autodetectarlo siempre.
+> **RULE (v1.4, consensus 2026-08-10):** auto-detect the port and take the
+> password from the environment **immediately before EACH send**, never from a
+> previous task and **never hardcoded** in a script. If a script has
+> `$port = "56678"` (or any other fixed value) or a pasted literal password,
+> that script is WRONG: on application restart the port changes and the
+> password is rotated, and messages sent with old values **do not arrive**
+> (they are silently lost or return an error). Every model that sends messages
+> is responsible for updating its snippet to always auto-detect.
 
-Al reiniciar la aplicación cambia el puerto, y el password también puede
-cambiar. **No reutilices credenciales de una tarea anterior ni las fijes en
-un script**: detecta el puerto y el password en el momento del envío y
-verifica que funcionan.
+On application restart the port changes, and the password may also
+change. **Do not reuse credentials from a previous task or hardcode them in
+a script**: detect the port and password at send time and
+verify they work.
 
 ```powershell
 $logDir = "$env:APPDATA\ai.opencode.desktop\logs"
@@ -64,197 +64,197 @@ $latestLog = Get-ChildItem $logDir | Sort-Object LastWriteTime -Descending | Sel
 $content = Get-Content "$($latestLog.FullName)\main.log" -Raw
 $port = ([regex]::Match($content, "server ready.*url: 'http://127\.0\.0\.1:(\d+)'")).Groups[1].Value
 $password = $env:OPENCODE_SERVER_PASSWORD
-Write-Host "Puerto: $port"
+Write-Host "Port: $port"
 ```
 
-- Usuario de autenticación: `opencode`
-- Password: normalmente `$env:OPENCODE_SERVER_PASSWORD` (la variable del
-  proceso actual). También está guardado en `~/.config/opencode/.env`
-  bajo la clave `OPENCODE_SERVER_PASSWORD`.
-- Antes de continuar, verifica que las credenciales funcionan:
+- Authentication username: `opencode`
+- Password: normally `$env:OPENCODE_SERVER_PASSWORD` (the current
+  process's variable). Also stored in `~/.config/opencode/.env`
+  under the key `OPENCODE_SERVER_PASSWORD`.
+- Before continuing, verify that the credentials work:
 
 ```powershell
 curl.exe -s -m 8 -u "opencode:$password" "http://127.0.0.1:$port/global/health"
-# Debe responder algo como: {"healthy":true,"version":"..."}
+# Should respond something like: {"healthy":true,"version":"..."}
 ```
 
-Si `health` no responde, la app se ha reiniciado: repite la detección desde cero.
+If `health` does not respond, the app has restarted: repeat the detection from scratch.
 
-## 2. Listar sesiones del proyecto
+## 2. List project sessions
 
 ```powershell
 curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session" | ConvertFrom-Json
 ```
 
-Cada sesión incluye `id`, `title`, `directory`, `agent`, `model` y `time`.
-Filtra por `directory` para quedarte solo con las de este proyecto:
+Each session includes `id`, `title`, `directory`, `agent`, `model` and `time`.
+Filter by `directory` to keep only those for this project:
 
 ```powershell
 $sessions = curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session" | ConvertFrom-Json
-$sessions | Where-Object { $_.directory -eq "TU_DIRECTIO_DEL_PROYECTO" } |
+$sessions | Where-Object { $_.directory -eq "YOUR_PROJECT_DIR" } |
     Select-Object id, title, agent
 ```
 
-## 3. Leer los mensajes de una sesión
+## 3. Read messages from a session
 
 ```powershell
-curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session/<ID_SESION>/message?limit=20"
+curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session/<SESSION_ID>/message?limit=20"
 ```
 
-## 4. Enviar un mensaje a otra sesión
+## 4. Send a message to another session
 
-> **IMPORTANTE (pitfall probado):** el JSON debe ir en un archivo y enviarse
-> con `--data-binary "@archivo"`. NO uses `-d '...'` inline en PowerShell:
-> corrompe el JSON y el servidor responde `HTTP 500 Unexpected server error`.
+> **IMPORTANT (tested pitfall):** the JSON must be in a file and sent
+> with `--data-binary "@file"`. Do NOT use `-d '...'` inline in PowerShell:
+> it corrupts the JSON and the server responds `HTTP 500 Unexpected server error`.
 
-> **Codificación:** envía los mensajes en ASCII plano (sin acentos ni
-> caracteres especiales). Al leer respuestas, los acentos y las comillas
-> tipográficas pueden llegar como signos `?` (mojibake); corrígelos al
-> integrar el contenido.
+> **Encoding:** send messages in plain ASCII (no accents or special
+> characters). When reading replies, accents and smart quotes
+> may arrive as `?` signs (mojibake); fix them when
+> integrating the content.
 
-> **Pitfall BOM (probado 2026-08-10):** si generas el archivo JSON con
+> **BOM pitfall (tested 2026-08-10):** if you generate the JSON file with
 > `[System.IO.File]::WriteAllText($f, $json, [System.Text.Encoding]::UTF8)`
-> (o `Set-Content -Encoding utf8`), PowerShell escribe un **BOM** al inicio
-> y el servidor responde `HTTP 500 Unexpected server error`
-> (`err_82db6391`/`err_cb996c5b`). Debe ser UTF-8 **sin BOM**:
-> `New-Object System.Text.UTF8Encoding($false)` — o directamente ASCII
-> (sin acentos), que es lo que usa `send_message.ps1` (4e).
+> (or `Set-Content -Encoding utf8`), PowerShell writes a **BOM** at the start
+> and the server responds `HTTP 500 Unexpected server error`
+> (`err_82db6391`/`err_cb996c5b`). It must be UTF-8 **without BOM**:
+> `New-Object System.Text.UTF8Encoding($false)` — or simply ASCII
+> (no accents), which is what `send_message.ps1` uses (4e).
 >
-> **Preferir ASCII para el envío (v1.5, aporte model-c):** si el texto del
-> mensaje puede contener caracteres no-ASCII (acentos, eñes, símbolos), es más
-> seguro enviarlo en ASCII plano que en UTF-8 sin BOM: aun con UTF-8 sin BOM,
-> caracteres como "í" o "ñ" pueden llegar como `?` (mojibake) en el destino.
-> Escribe los mensajes sin acentos o reemplaza los caracteres problemáticos.
-> Esto aplica a TODOS los envíos entre sesiones (líder→asesor y asesor→líder).
+> **Prefer ASCII for sending (v1.5, model-c contribution):** if the message
+> text may contain non-ASCII characters (accents, ñ's, symbols), it is safer
+> to send in plain ASCII than in UTF-8 without BOM: even with UTF-8 without BOM,
+> characters like "í" or "ñ" may arrive as `?` (mojibake) at the destination.
+> Write messages without accents or replace problematic characters.
+> This applies to ALL sends between sessions (leader→advisor and advisor→leader).
 
-### 4a. Entregar mensaje sin que el agente destino procese (`noReply: true`)
+### 4a. Deliver a message without the destination agent processing it (`noReply: true`)
 
-El mensaje aparece al instante en el chat de la sesión destino como mensaje de
-usuario, pero el agente destino NO responde. Útil para notas/avisos.
+The message instantly appears in the destination session's chat as a
+user message, but the destination agent does NOT reply. Useful for notes/notices.
 
 ```powershell
-$body = '{"parts":[{"type":"text","text":"TU MENSAJE"}],"noReply":true}'
+$body = '{"parts":[{"type":"text","text":"YOUR_MESSAGE"}],"noReply":true}'
 $body | Set-Content "$env:TEMP\msg.json" -Encoding ascii -NoNewline
 
 curl.exe -s -X POST -u "opencode:$password" -H "Content-Type: application/json" `
   --data-binary "@$env:TEMP\msg.json" `
-  "http://127.0.0.1:$port/session/<ID_DESTINO>/message"
+  "http://127.0.0.1:$port/session/<DEST_ID>/message"
 ```
 
-Devuelve `HTTP 200` con el mensaje creado.
+Returns `HTTP 200` with the created message.
 
-### 4b. Enviar mensaje y esperar la respuesta del agente destino (síncrono)
+### 4b. Send a message and wait for the destination agent's reply (synchronous)
 
-Sin `noReply`, el agente de la sesión destino procesa el mensaje y su
-respuesta completa (razonamiento + texto) se devuelve en la misma llamada.
+Without `noReply`, the destination session's agent processes the message and its
+full reply (reasoning + text) is returned in the same call.
 
 ```powershell
-$body = '{"parts":[{"type":"text","text":"TU PREGUNTA"}]}'
+$body = '{"parts":[{"type":"text","text":"YOUR_QUESTION"}]}'
 $body | Set-Content "$env:TEMP\msg.json" -Encoding ascii -NoNewline
 
 curl.exe -s -X POST -u "opencode:$password" -H "Content-Type: application/json" `
   --data-binary "@$env:TEMP\msg.json" `
-  "http://127.0.0.1:$port/session/<ID_DESTINO>/message"
+  "http://127.0.0.1:$port/session/<DEST_ID>/message"
 ```
 
-Esta llamada es síncrona: espera a que el agente destino termine de responder
-(puede tardar más de 1 minuto).
+This call is synchronous: it waits for the destination agent to finish replying
+(it may take over 1 minute).
 
-### 4c. Enviar mensaje y dejar que el agente destino procese en segundo plano (método ESTÁNDAR para cross-talk)
+### 4c. Send a message and let the destination agent process it in the background (STANDARD method for cross-talk)
 
-`POST /session/:id/prompt_async` entrega el mensaje y devuelve `HTTP 204`
-inmediatamente. El agente destino lo procesa en background y puede
-responderte después. **Es el método estándar y preferido para toda la
-comunicación entre agentes** (v1.5, aporte model-d): no bloquea, despierta al
-destino y no necesita `noReply` (que es redundante — `prompt_async` ya entrega
-sin esperar respuesta). Usa `noReply` (4a) o `/message` síncrono (4b) solo
-cuando tengas una razón concreta.
+`POST /session/:id/prompt_async` delivers the message and returns `HTTP 204`
+immediately. The destination agent processes it in the background and may
+reply to you later. **It is the standard and preferred method for all
+agent communication** (v1.5, model-d contribution): it does not block, wakes up the
+destination, and does not need `noReply` (which is redundant — `prompt_async` already delivers
+without waiting for a reply). Use `noReply` (4a) or synchronous `/message` (4b) only
+when you have a specific reason.
 
 ```powershell
-$body = '{"parts":[{"type":"text","text":"TU MENSAJE"}]}'
+$body = '{"parts":[{"type":"text","text":"YOUR_MESSAGE"}]}'
 $body | Set-Content "$env:TEMP\msg.json" -Encoding ascii -NoNewline
 
 curl.exe -s -X POST -u "opencode:$password" -H "Content-Type: application/json" `
   --data-binary "@$env:TEMP\msg.json" `
-  "http://127.0.0.1:$port/session/<ID_DESTINO>/prompt_async"
+  "http://127.0.0.1:$port/session/<DEST_ID>/prompt_async"
 ```
 
-### 4d. El líder comunica los IDs y el modelo a los integrantes (identidad/firma)
+### 4d. The leader communicates IDs and model to members (identity/signature)
 
-El **líder** (el que inicia la tarea) conoce su propio ID de sesión y los de
-los demás: los autodetecta con `GET /session` (ver nota abajo). Para que cada
-integrante firme sus tokens con SU ID y no se confunda, el líder debe
-**incluir en el mensaje de la tarea el ID y el modelo de cada destinatario**,
-indicándole explícitamente cuáles son los suyos:
+The **leader** (the one who initiates the task) knows its own session ID and those of
+the others: it auto-detects them with `GET /session` (see note below). So that each
+member signs its tokens with ITS ID and avoids confusion, the leader must
+**include in the task message the ID and model of each recipient**,
+explicitly telling them which ones are theirs:
 
 ```
-[Tu ID de sesion es: <ID_DESTINO> y tu modelo es: <MODELO_DESTINO>.
-Cuando respondas, firma tus tokens asi:
-TOKEN:<ID_DESTINO>:<MODELO_DESTINO>
-(por ejemplo ACUERDO-FINAL:ses_XXXXXXXX:model-b).
-Tu token de respuesta sera: MEJORA-R1:<ID_DESTINO>:<MODELO_DESTINO>
-(ejemplo: MEJORA-R1:ses_abc123:model-b).
-El lider que te envia este mensaje es:
-ID: <ID_LIDER> | modelo: <MODELO_LIDER>.
-Responde SIEMPRE a esa sesion de origen.
-PROTOCOLO: CROSS-TALK v1.6.1 — responde ACK-PROTOCOLO:1.6.1 si lo entiendes
+[Your session ID is: <DEST_ID> and your model is: <DEST_MODEL>.
+When replying, sign your tokens like this:
+TOKEN:<DEST_ID>:<DEST_MODEL>
+(for example ACUERDO-FINAL:ses_XXXXXXXX:model-b).
+Your reply token will be: MEJORA-R1:<DEST_ID>:<DEST_MODEL>
+(example: MEJORA-R1:ses_abc123:model-b).
+The leader sending you this message is:
+ID: <LEADER_ID> | model: <LEADER_MODEL>.
+ALWAYS reply to that origin session.
+PROTOCOL: CROSS-TALK v1.6.1 — reply ACK-PROTOCOLO:1.6.1 if you understand
 ]
 ```
 
-**Handshake de versión de protocolo (v1.6.1, corrección external-reviewer 2026-08-11):** el
-mensaje de la tarea incluye la línea `PROTOCOLO: CROSS-TALK v1.6.1`. El asesor
-debe responder `ACK-PROTOCOLO:1.6.1` (tres segmentos EXACTOS: sin `v`, sin
-prefijo) en los primeros 30 s, junto a su primer ACK si procede. Reglas:
-- Si el asesor responde `ACK-PROTOCOLO:1.6.1` → versión compatible.
-- Si responde `ACK-PROTOCOLO:<otra_versión>` → incompatibilidad: el líder le
-  envía el **bloque canónico de reglas críticas (§4f)** y le aclara la
-  diferencia de versión antes de proseguir.
-- Si NO responde en 30 s → el líder lo asume como agente sin protocolo: le
-  envía el bloque de reglas críticas (§4f) y reintenta el handshake.
-- Un agente que no entienda el handshake también puede responder
-  `NACK-PROTOCOLO:version_no_soportada:<versión_recibida>` (o con la versión
-  que sí entiende); el líder decide si continuar con esa versión o excluirlo.
-- Este handshake se repite al inicio de CADA tarea (no por mensaje).
+**Protocol version handshake (v1.6.1, external-reviewer correction 2026-08-11):** the
+task message includes the line `PROTOCOLO: CROSS-TALK v1.6.1`. The advisor
+must reply `ACK-PROTOCOLO:1.6.1` (EXACTLY three segments: no `v`, no
+prefix) within the first 30 s, along with its first ACK if applicable. Rules:
+- If the advisor replies `ACK-PROTOLO:1.6.1` → compatible version.
+- If it replies `ACK-PROTOCOLO:<other_version>` → incompatibility: the leader sends
+  it the **canonical critical rules block (§4f)** and clarifies the
+  version difference before proceeding.
+- If it does NOT reply within 30 s → the leader assumes it is an agent without protocol: it
+  sends the critical rules block (§4f) and retries the handshake.
+- An agent that does not understand the handshake may also reply
+  `NACK-PROTOCOLO:unsupported_version:<received_version>` (or with the version
+  it does understand); the leader decides whether to continue with that version or exclude it.
+- This handshake is repeated at the start of EVERY task (not per message).
 
-Cada integrante recibe un mensaje individualizado con SU propio ID y SU modelo.
-Así nadie adivina ni copia IDs ajenos.
+Each member receives an individualized message with ITS OWN ID and model.
+This way no one guesses or copies other people's IDs.
 
-> **El líder también se identifica (v1.5, probado 2026-08-10):** el mensaje del
-> líder debe incluir su **propio ID y modelo** además de los del destinatario.
-> Pitfall real: model-d quedó bloqueada al no saber a qué sesión debía responder
-> porque el mensaje de la tarea no identificaba al emisor. Sin el ID del líder
-> en el mensaje, el asesor no puede dirigir su respuesta (sección 5) ni firmar
-> correctamente.
+> **The leader also identifies itself (v1.5, tested 2026-08-10):** the leader's message
+> must include its **own ID and model** in addition to the recipient's.
+> Real pitfall: model-d got blocked because it did not know which session to reply to
+> because the task message did not identify the sender. Without the leader's ID
+> in the message, the advisor cannot direct its reply (section 5) or sign
+> correctly.
 
-> **Firma con modelo legible (v1.2, 2026-08-10):** además del ID de sesión, la
-> firma incluye el **nombre del modelo** (`TOKEN:<ID_SESION>:<MODELO>`). El
-> usuario humano puede leer de un vistazo qué modelo envió cada mensaje, en vez
-> de descifrar una cadena de letras y números. El ID de sesión se mantiene como
-> identificador canónico (máquina); el modelo es legible (humano). El líder
-> obtiene el modelo de `GET /session` → `model.id`.
+> **Signature with human-readable model (v1.2, 2026-08-10):** in addition to the session ID, the
+> signature includes the **model name** (`TOKEN:<SESSION_ID>:<MODEL>`). The
+> human user can read at a glance which model sent each message, instead
+> of deciphering a string of letters and numbers. The session ID is kept as
+> the canonical identifier (machine); the model is human-readable. The leader
+> gets the model from `GET /session` → `model.id`.
 
-> **Nota sobre autodetección del propio ID (líder):** el líder sabe su ID de
-> sesión porque es la sesión que está ejecutando (p. ej. viene indicado en el
-> contexto de la sesión actual). Los IDs de los demás los obtiene de
-> `GET /session` filtrando por `directory`. Para una firma correcta, es
-> imprescindible que el líder asigne a cada integrante SU ID real (el que
-> aparece en la lista) y se lo comunique tal cual.
+> **Note on auto-detection of own ID (leader):** the leader knows its session ID
+> because it is the session it is running (e.g. it appears in the
+> current session's context). It gets the IDs of the others from
+> `GET /session` filtered by `directory`. For a correct signature, it is
+> essential that the leader assigns each member ITS real ID (the one
+> that appears in the list) and communicates it as-is.
 
-### 4e. Wrapper `send_message.ps1` (autodetección obligatoria, práctica anti-corrupción)
+### 4e. `send_message.ps1` wrapper (mandatory auto-detection, anti-corruption practice)
 
-> **Consenso (Rondas de mejora 2026-08-10):** el wrapper es una **utilidad
-> OPCIONAL** que encapsula el patrón "escribir JSON a archivo + `curl
-> --data-binary`". No reemplaza el método manual documentado en 4a-4c: solo lo
-> automatiza para evitar los pitfalls de quoting/encoding. Puedes usar el método
-> manual o el wrapper indistintamente.
+> **Consensus (Improvement Rounds 2026-08-10):** the wrapper is an **OPTIONAL
+> utility** that encapsulates the pattern "write JSON to file + `curl
+> --data-binary`". It does not replace the manual method documented in 4a-4c: it only
+> automates it to avoid quoting/encoding pitfalls. You can use the manual
+> method or the wrapper interchangeably.
 >
-> **REGLA v1.4:** el wrapper **SIEMPRE autodetecta** el puerto desde el log más
-> reciente y el password desde `$env:OPENCODE_SERVER_PASSWORD`, **ignorando**
-> cualquier valor fijo pasado por parámetro. Es la versión recomendada para
-> todo envío: elimina la clase de bug en la que un modelo usa credenciales
-> viejas y su mensaje no llega.
+> **RULE v1.4:** the wrapper ALWAYS auto-detects the port from the most
+> recent log and the password from `$env:OPENCODE_SERVER_PASSWORD`, **ignoring**
+> any fixed value passed as parameter. It is the recommended version for
+> all sends: it eliminates the class of bug where a model uses old
+> credentials and its message does not arrive.
 
-`whiteboard/send_message.ps1` (ruta de referencia dentro del proyecto):
+`whiteboard/send_message.ps1` (reference path within the project):
 
 ```powershell
 param(
@@ -265,16 +265,16 @@ param(
   [switch]$NoReply
 )
 
-# AUTODETECCIÓN SIEMPRE: el puerto cambia al reiniciar el servidor.
-# Se ignora cualquier puerto/password pasado por parámetro.
+# ALWAYS AUTO-DETECT: the port changes on server restart.
+# Any port/password passed as parameter is ignored.
 $logDir = "$env:APPDATA\ai.opencode.desktop\logs"
 $latestLog = Get-ChildItem $logDir | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 $Puerto = ([regex]::Match((Get-Content "$($latestLog.FullName)\main.log" -Raw),
   "server ready.*url: 'http://127\.0\.0\.1:(\d+)'")).Groups[1].Value
-if (-not $Puerto) { throw "No se pudo autodetectar el puerto del servidor" }
+if (-not $Puerto) { throw "Could not auto-detect server port" }
 
 $Password = $env:OPENCODE_SERVER_PASSWORD
-if (-not $Password) { throw "No está definida OPENCODE_SERVER_PASSWORD en el entorno" }
+if (-not $Password) { throw "OPENCODE_SERVER_PASSWORD is not defined in the environment" }
 
 $payload = @{ parts = @(@{ type = "text"; text = $Texto }) }
 if ($NoReply) { $payload.noReply = $true }
@@ -287,172 +287,172 @@ curl.exe -s -X POST -u "opencode:$Password" -H "Content-Type: application/json" 
 Remove-Item $file -ErrorAction SilentlyContinue
 ```
 
-Uso:
+Usage:
 
 ```powershell
-& ".\whiteboard\send_message.ps1" -Destino "ses_AAAAAAAA" -Texto "TU MENSAJE" -NoReply
+& ".\whiteboard\send_message.ps1" -Destino "ses_AAAAAAAA" -Texto "YOUR_MESSAGE" -NoReply
 ```
 
-Notas:
-- No hace falta pasar `-Puerto` ni `-Password`: se autodetectan siempre.
-- `-NoReply` entrega sin que el destino procese (equivale a 4a).
-- Sin `-NoReply` usa `prompt_async` (equivale a 4c).
-- El wrapper usa `[System.IO.File]::WriteAllText` con codificación ASCII y
-  `ConvertTo-Json`: evita los errores de `-NoNewline`/encoding que causan HTTP 500.
-- Si autodetecta mal (p.ej. no encuentra el puerto) lanza error en lugar de
-  enviar con credenciales obsoletas.
+Notes:
+- No need to pass `-Puerto` or `-Password`: they are always auto-detected.
+- `-NoReply` delivers without the destination processing it (equivalent to 4a).
+- Without `-NoReply` it uses `prompt_async` (equivalent to 4c).
+- The wrapper uses `[System.IO.File]::WriteAllText` with ASCII encoding and
+  `ConvertTo-Json`: it avoids `-NoNewline`/encoding errors that cause HTTP 500.
+- If auto-detection fails (e.g. it cannot find the port) it throws an error instead of
+  sending with obsolete credentials.
 
-### 4f. Reglas críticas mínimas (handshake fallback, v1.6.1 O2 external-reviewer)
+### 4f. Minimal critical rules (fallback handshake, v1.6.1 O2 external-reviewer)
 
-Cuando un asesor no responde `ACK-PROTOCOLO:1.6.1` en 30 s (4d), el líder le
-envía este **bloque canónico** copiable, sin editarlo ni improvisar. Son 8
-líneas suficientes para que cualquier agente opere sin haber leído
+When an advisor does not reply `ACK-PROTOCOLO:1.6.1` within 30 s (4d), the leader sends
+it this **canonical block** to be copied verbatim, without editing or improvising. It is 8
+lines sufficient for any agent to operate without having read
 CROSS_TALK.md:
 
 ```
-PROTOCOLO CROSS-TALK v1.6.1 — REGLAS CRITICAS:
-1. Tu ID y modelo te los comunica el líder (no los adivines).
-2. Responde SIEMPRE por API (prompt_async sin noReply) a la sesión del líder.
-3. ACK primero, después procesas: ACK:<token>:<tu_ID>:<tu_modelo>.
-4. Si NO puedes hacer la tarea: NACK:<token>:<tu_ID>:<tu_modelo>:<razon_cerrada>.
-5. Antes de procesar: CLAIM tu msg_id en idempotencia-procesados.md.
-6. Al terminar: marca PROCESADO en idempotencia-procesados.md.
-7. Si recibes "sigue": es RESUME, continúa tu contexto (no es un nuevo mensaje).
-8. Detalle completo en CROSS_TALK.md.
+PROTOCOLO CROSS-TALK v1.6.1 — CRITICAL RULES:
+1. Your ID and model are communicated by the leader (do not guess them).
+2. ALWAYS reply via API (prompt_async without noReply) to the leader's session.
+3. ACK first, then process: ACK:<token>:<your_ID>:<your_model>.
+4. If you CANNOT do the task: NACK:<token>:<your_ID>:<your_model>:<closed_reason>.
+5. Before processing: CLAIM your msg_id in idempotencia-procesados.md.
+6. When done: mark PROCESADO in idempotencia-procesados.md.
+7. If you receive "sigue": it is RESUME, continue your context (it is not a new message).
+8. Full details in CROSS_TALK.md.
 ```
 
-Con eso el handshake fallback es determinista: cualquier líder envía el mismo
-texto y cualquier agente puede operar con lo mínimo.
+With this, the fallback handshake is deterministic: any leader sends the same
+text and any agent can operate with the minimum.
 
-## 5. Ejemplo completo: responder a una sesión que te escribió
+## 5. Complete example: replying to a session that messaged you
 
-> **REGLAS OBLIGATORIAS al recibir un mensaje de otra sesión:**
+> **MANDATORY RULES when receiving a message from another session:**
 >
-> 1. Tu respuesta debe **enviarse a la sesión de origen mediante esta API**
->    (`POST /session/<ID_ORIGEN>/message` o `prompt_async`). NUNCA te limites a
->    escribir la respuesta en tu propia conversación: el remitente no la ve.
->    **El canal principal es SIEMPRE la API.** Responder solo en tu chat es un
->    fallo de entrega: el emisor no recibe nada y debe reclamarte. Escribir en
->    el chat sin enviar por API solo se acepta cuando no existe otra forma de
->    enviar (fallo externo del entorno, el modelo no dispone de herramientas de
->    red, etc.) y SIEMPRE avisando por chat al líder de que no pudiste enviarlo.
-> 2. Identifica al remitente por su **ID de sesión** (p. ej. `ses_AAAAAAAA`)
->    y el mensaje te dirá el token a devolver (p. ej. `ACUERDO-FINAL`).
->    Si el mensaje **no identifica al emisor** (ID + modelo), pide confirmación
->    o responde a la sesión de la que leíste el mensaje; el líder debe incluirlo
->    (sección 4d).
-> 3. Si el mensaje pide una tarea/consulta, después de trabajarla responde con
->    **el MISMO token que recibiste** (si recibiste `BUGS-R1`, responde
->    `BUGS-R1:TU_ID:TU_MODELO`), **y tu resultado**, dirigido a la sesión que
->    preguntó. Usar otro token rompe la trazabilidad (v1.5, aporte model-c).
-> 4. Ejecuta el script de esta sección, no "improvises" un texto suelto.
+> 1. Your reply must **be sent to the origin session via this API**
+>    (`POST /session/<ORIGIN_ID>/message` or `prompt_async`). NEVER just
+>    write the reply in your own conversation: the sender will not see it.
+>    **The primary channel is ALWAYS the API.** Replying only in your chat is a
+>    delivery failure: the sender receives nothing and must reclaim it from you. Writing in
+>    the chat without sending via API is only acceptable when there is no other way
+>    to send (external environment failure, the model does not have network
+>    tools, etc.) and ALWAYS notifying the leader in the chat that you could not send it.
+> 2. Identify the sender by its **session ID** (e.g. `ses_AAAAAAAA`)
+>    and the message will tell you the token to return (e.g. `ACUERDO-FINAL`).
+>    If the message **does not identify the sender** (ID + model), request confirmation
+>    or reply to the session you read the message from; the leader must include it
+>    (section 4d).
+> 3. If the message requests a task/consultation, after working on it reply with
+>    **the SAME token you received** (if you received `BUGS-R1`, reply
+>    `BUGS-R1:YOUR_ID:YOUR_MODEL`), **and your result**, directed to the session that
+>    asked. Using a different token breaks traceability (v1.5, model-c contribution).
+> 4. Run the script in this section, do not "improvise" a loose text.
 
-Si una sesión (por ejemplo `ses_AAAAAAAA`) te envía un mensaje, para
-**responderle a esa sesión** ejecuta lo siguiente. Incluye un token único para
-que la sesión de origen pueda verificar que tu respuesta llegó.
+If a session (e.g. `ses_AAAAAAAA`) sends you a message, to
+**reply to that session** run the following. Include a unique token so
+that the origin session can verify that your reply arrived.
 
-> **IMPORTANTE (identificar al emisor):** cuando la sesión de origen pide un
-> token fijo (p. ej. `ACUERDO-FINAL-C1`), TODAS las respuestas llegan con el
-> mismo token y no se puede saber quién la envió. Por eso, siempre que
-> respondas, añade al token **tu propio ID de sesión y tu modelo** como sufijo,
-> en el formato `TOKEN:TU_ID_DE_SESION:TU_MODELO`
-> (p. ej. `ACUERDO-FINAL-C1:ses_XXXXXXXX:model-b`).
-> Así la sesión de origen puede contar un voto por agente, saber exactamente
-> quién acordó o propuso cambios, y mostrar al usuario humano qué modelo
-> respondió.
+> **IMPORTANT (identifying the sender):** when the origin session requests a
+> fixed token (e.g. `ACUERDO-FINAL-C1`), ALL replies arrive with the
+> same token and it is impossible to know who sent it. Therefore, whenever
+> you reply, append **your own session ID and model** as a suffix
+> to the token, in the format `TOKEN:YOUR_SESSION_ID:YOUR_MODEL`
+> (e.g. `ACUERDO-FINAL-C1:ses_XXXXXXXX:model-b`).
+> This way the origin session can count one vote per agent, know exactly
+> who agreed or proposed changes, and show the human user which model
+> replied.
 
-> **CÓMO SABER TU PROPIO ID Y MODELO (NO los adivines):** tu ID y tu modelo son
-> los que el líder te comunicó en el mensaje de la tarea (sección 4d). NUNCA
-> intentes deducirlos filtrando la lista de sesiones por directorio: varios
-> agentes comparten el mismo `directory` y es fácil confundirse (pitfall real:
-> un asesor firmó con el ID de otro). Si el mensaje de la tarea no te los
-> indica, responde a la sesión de origen con el token fijo SIN sufijo; el líder
-> te identificará por el contenido.
+> **HOW TO KNOW YOUR OWN ID AND MODEL (DO NOT GUESS):** your ID and model are
+> the ones the leader communicated to you in the task message (section 4d). NEVER
+> try to deduce them by filtering the session list by directory: several
+> agents share the same `directory` and it is easy to get confused (real pitfall:
+> an advisor signed with another's ID). If the task message does not specify
+> them, reply to the origin session with the fixed token WITHOUT a suffix; the leader
+> will identify you by the content.
 
 ```powershell
-# 1. Detectar credenciales
+# 1. Detect credentials
 $logDir = "$env:APPDATA\ai.opencode.desktop\logs"
 $latestLog = Get-ChildItem $logDir | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 $content = Get-Content "$($latestLog.FullName)\main.log" -Raw
 $port = ([regex]::Match($content, "server ready.*url: 'http://127\.0\.0\.1:(\d+)'")).Groups[1].Value
 $password = $env:OPENCODE_SERVER_PASSWORD
 
-# 2. Preparar la respuesta dirigida a la sesión que preguntó
+# 2. Prepare the reply directed to the session that asked
 $origen = "ses_AAAAAAAA"
-# El líder te indicó tu ID y tu modelo en el mensaje de la tarea (sección 4d). Sustitúyelos:
+# The leader told you your ID and model in the task message (section 4d). Replace them:
 $miSesion = "ses_XXXXXXXX"
-$miModelo = "TU_MODELO"
-$respuesta = "RESPUESTA AL OTRO AGENTE. Token de verificacion: MI-TOKEN-UNICO:$miSesion:$miModelo"
+$miModelo = "YOUR_MODEL"
+$respuesta = "REPLY TO THE OTHER AGENT. Verification token: MY-UNIQUE-TOKEN:$miSesion:$miModelo"
 $body = @{ parts = @(@{ type = "text"; text = $respuesta }) } | ConvertTo-Json -Depth 5
 $body | Set-Content "$env:TEMP\msg.json" -Encoding ascii -NoNewline
 
-# 3. Enviarla a la sesión que preguntó (sin noReply para que ella lo vea al instante)
+# 3. Send it to the session that asked (without noReply so it sees it instantly)
 curl.exe -s -X POST -u "opencode:$password" -H "Content-Type: application/json" `
   --data-binary "@$env:TEMP\msg.json" `
   "http://127.0.0.1:$port/session/$origen/message"
 ```
 
-Notas:
-- Usa `noReply: true` si solo quieres entregar un aviso sin que el destino
-  deba procesarlo.
-- Usa `prompt_async` en el destino cuando la otra sesión debe procesar tu
-  mensaje y trabajar en ello en segundo plano.
-- **Pitfall verificado (2026-08-10):** un agente recibió una consulta, trabajó
-  la respuesta y la escribió únicamente en SU conversación, sin enviarla a la
-  sesión de origen. El remitente nunca la recibió y hubo que reclamarle. SIEMPRE
-  completa la respuesta con el paso 3 de arriba: el `curl` que envía el mensaje
-  a la sesión de origen.
+Notes:
+- Use `noReply: true` if you only want to deliver a notice without the destination
+  having to process it.
+- Use `prompt_async` at the destination when the other session needs to process your
+  message and work on it in the background.
+- **Verified pitfall (2026-08-10):** an agent received a query, worked
+  the reply and wrote it only in ITS OWN conversation, without sending it to the
+  origin session. The sender never received it and had to reclaim it. ALWAYS
+  complete the reply with step 3 above: the `curl` that sends the message
+  to the origin session.
 
-## 5.1. Mecanismo de "despertado" (recibir sin hacer polling)
+## 5.1. "Wake-up" mechanism (receiving without polling)
 
-Cuando una sesión A envía un mensaje a una sesión B **sin `noReply`** (o con
-`prompt_async`), el agente de B se "despierta" automáticamente y procesa el
-mensaje en segundo plano: no hace falta que B esté haciendo polling. Así
-funciona la cadena completa sin sondeos en el emisor:
+When session A sends a message to session B **without `noReply`** (or with
+`prompt_async`), session B's agent "wakes up" automatically and processes the
+message in the background: B does not need to be polling. This is how
+the complete chain works without polling from the sender:
 
-1. El **líder** envía la tarea con `prompt_async` (sección 4c) a los asesores.
-2. Cada **asesor** se despierta solo, trabaja la tarea y responde al líder
-   usando la sección 5 (POST a la sesión del líder, también sin `noReply`).
-3. El **líder** queda despierto de nuevo cuando llega la respuesta y puede
-   procesarla sin haber sondeado el historial.
+1. The **leader** sends the task with `prompt_async` (section 4c) to the advisors.
+2. Each **advisor** wakes up on its own, works the task and replies to the leader
+   using section 5 (POST to the leader's session, also without `noReply`).
+3. The **leader** is woken up again when the reply arrives and can
+   process it without having polled the history.
 
-Lo que NO despierta al destino:
-- `noReply: true` solo deja el mensaje en el chat; el agente no reacciona.
-- Escribir la respuesta en tu propia conversación no se propaga a nadie.
+What does NOT wake up the destination:
+- `noReply: true` only leaves the message in the chat; the agent does not react.
+- Writing the reply in your own conversation does not propagate to anyone.
 
-Para terminar limpiamente un turno: entrega tu mensaje (con `prompt_async` o
-POST sin `noReply`) y finaliza tu respuesta; el mensaje entrante te despertará
-cuando llegue.
+To cleanly finish a turn: deliver your message (with `prompt_async` or
+POST without `noReply`) and finish your reply; the incoming message will wake you
+up when it arrives.
 
-> **Pitfall verificado (2026-08-11, competición de acertijos):** durante la
-> ronda 2, model-b/model-c respondieron al líder con `noReply: true`. El mensaje
-> quedó guardado en la sesión del líder (`user` sin `time.completed`) pero el
-> líder NO se despertó: el servidor nunca generó `message=process`/`stream`
-> para su sesión. Confirmado por logs y por prueba controlada (dos mensajes
-> idénticos a la misma sesión: `noReply: true` → sin respuesta; `noReply:
-> false` → procesado y respondido). Los mensajes solo se vieron al revisar el
-> historial manualmente. **Regla reforzada: para responder al líder, enviar
-> SIEMPRE con `prompt_async` (sin `noReply`) o POST sin `noReply`. Nunca usar
-> `noReply: true` para entregar una respuesta o resultado pendiente.**
+> **Verified pitfall (2026-08-11, riddle competition):** during
+> round 2, model-b/model-c replied to the leader with `noReply: true`. The message
+> was stored in the leader's session (`user` without `time.completed`) but the
+> leader did NOT wake up: the server never generated `message=process`/`stream`
+> for its session. Confirmed by logs and controlled test (two identical
+> messages to the same session: `noReply: true` → no response; `noReply:
+> false` → processed and replied). The messages were only seen when manually reviewing the
+> history. **Reinforced rule: to reply to the leader, ALWAYS send
+> with `prompt_async` (without `noReply`) or POST without `noReply`. Never use
+> `noReply: true` to deliver a pending reply or result.**
 
-Para terminar limpiamente un turno: entrega tu mensaje (con `prompt_async` o
-POST sin `noReply`) y finaliza tu respuesta; el mensaje entrante te despertará
-cuando llegue.
+To cleanly finish a turn: deliver your message (with `prompt_async` or
+POST without `noReply`) and finish your reply; the incoming message will wake you
+up when it arrives.
 
-## 6. Verificar que la otra sesión respondió
+## 6. Verify that the other session replied
 
-Lee el historial de la sesión de origen filtrando los mensajes **nuevos de
-tipo `user`** (son los que el otro agente inyecta) creados después de un
-momento dado, y busca tu token:
+Read the origin session's history filtering for **new `user` type messages**
+(those injected by the other agent) created after a
+given moment, and search for your token:
 
 ```powershell
-$mine = "ses_AAAAAAAA"   # la sesión donde esperas recibir la respuesta
-$token = "MI-TOKEN-UNICO"  # puede incluir :ses_XXXXXX como sufijo del emisor
+$mine = "ses_AAAAAAAA"   # the session where you expect to receive the reply
+$token = "MY-UNIQUE-TOKEN"  # may include :ses_XXXXXX as sender suffix
 
-# Marca el momento justo antes de enviar tu mensaje
+# Mark the moment right before sending your message
 $start = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 
-# Después de enviar el mensaje, sondea hasta 3 minutos:
+# After sending the message, poll for up to 3 minutes:
 $deadline = (Get-Date).AddMinutes(3)
 while ((Get-Date) -lt $deadline) {
   $msgs = curl.exe -s -m 10 -u "opencode:$password" "http://127.0.0.1:$port/session/$mine/message?limit=10" | ConvertFrom-Json
@@ -460,79 +460,79 @@ while ((Get-Date) -lt $deadline) {
     if ($m.info.role -ne "user") { continue }
     if ($m.info.time.created -lt $start) { continue }
     foreach ($t in ($m.parts | Where-Object { $_.type -eq "text" } | ForEach-Object { $_.text })) {
-      if ($t -like "*$token*") { Write-Host "RESPUESTA RECIBIDA: $t"; exit }
+      if ($t -like "*$token*") { Write-Host "REPLY RECEIVED: $t"; exit }
     }
   }
   Start-Sleep -Seconds 10
 }
-Write-Host "No se recibio respuesta en 3 minutos."
+Write-Host "No reply received within 3 minutes."
 ```
 
-## 6.1. Diagnóstico de un asesor atascado / "sigue"
+## 6.1. Diagnosis of a stuck / "sigue" advisor
 
-No esperes indefinidamente. Si pasada la ventana de verificación falta la
-respuesta de algún asesor, **lee su sesión** para ver en qué punto se quedó y,
-si sigue parado, **despiértalo enviándole `sigue`**. Estos son los pasos:
+Do not wait indefinitely. If after the verification window some advisor's
+reply is missing, **read its session** to see where it got stuck and,
+if it is still stalled, **wake it up by sending `sigue`**. Here are the steps:
 
-### a) Leer la sesión de un asesor (ver qué ha pasado)
+### a) Read an advisor's session (see what happened)
 
 ```powershell
-$asesor = "ses_AAAAAAAA"   # el ID de la sesión que no ha respondido
+$advisor = "ses_AAAAAAAA"   # the ID of the session that has not replied
 
-curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session/$asesor/message?limit=10" |
+curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session/$advisor/message?limit=10" |
     ConvertFrom-Json | ForEach-Object {
         $text = ($_.parts | Where-Object { $_.type -eq "text" } | ForEach-Object { $_.text }) -join ' '
         "[$($_.info.role)] ($($_.info.time.created)) $($text.Substring(0, [Math]::Min(200, $text.Length)))"
     }
 ```
 
-Con esto puedes saber si:
-- el mensaje de la tarea **le llegó** (último mensaje `user`),
-- el agente **empezó a trabajar** (hay `reasoning` o un `assistant` a medias),
-- **terminó y respondió** (último `assistant` dice "Enviado...") — si respondió
-  pero no llegó a tu sesión, es el pitfall de la sección 5: reclamale que lo
-  envíe por API,
-- o simplemente **se quedó en blanco / sin actividad** (sin `assistant` tras el
-  `user`): está atascado.
+With this you can find out if:
+- the task message **reached it** (last `user` message),
+- the agent **started working** (there is `reasoning` or a half-done `assistant`),
+- **finished and replied** (last `assistant` says "Sent...") — if it replied
+  but it did not reach your session, it is the pitfall from section 5: ask it to
+  send it via API,
+- or it simply **went blank / has no activity** (no `assistant` after the
+  `user`): it is stuck.
 
-### b) Comprobar si el agente SIGUE trabajando (antes de intervenir)
+### b) Check if the agent is STILL working (before intervening)
 
-Un asesor puede tardar más de 3 minutos simplemente porque **está trabajando
-todavía** (responde bien y tarde), no porque esté atascado. Antes de enviarle
-`cualquier cosa`, verifica que la sesión **ya no crece**:
+An advisor may take over 3 minutes simply because it **is still working**
+(replies correctly but slowly), not because it is stuck. Before sending it
+`anything`, verify that the session **is no longer growing**:
 
-- Lee su sesión (a) **dos veces separadas unos segundos** (p. ej. 15 s).
-- Si entre las dos lecturas aparecieron **mensajes o partes nuevas**
-  (nuevo `assistant`, `reasoning`, tool calls, o creció el texto del último
-  mensaje), el agente sigue activo: **no le envíes `sigue`**, vuelve a esperar
-  y repite la comprobación.
-- Si las dos lecturas son **idénticas**, la sesión está quieta: ya puedes
-  diagnosticar y, si procede, despertarlo con (c).
+- Read its session (a) **twice, a few seconds apart** (e.g. 15 s).
+- If between the two readings **new messages or parts appeared**
+  (new `assistant`, `reasoning`, tool calls, or the last message's text grew),
+  the agent is still active: **do NOT send it `sigue`**, wait again
+  and repeat the check.
+- If both readings are **identical**, the session is idle: you can now
+  diagnose and, if applicable, wake it up with (c).
 
 ```powershell
-$asesor = "ses_AAAAAAAA"
-# Lectura 1
-$a1 = curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session/$asesor/message?limit=5" |
+$advisor = "ses_AAAAAAAA"
+# Reading 1
+$a1 = curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session/$advisor/message?limit=5" |
     ConvertFrom-Json
 $a1Str = ($a1 | ForEach-Object { $_.info.id + ":" + ($_.parts | ForEach-Object { $_.type + ":" + $_.text }) }) -join '|'
 Start-Sleep -Seconds 15
-# Lectura 2
-$a2 = curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session/$asesor/message?limit=5" |
+# Reading 2
+$a2 = curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session/$advisor/message?limit=5" |
     ConvertFrom-Json
 $a2Str = ($a2 | ForEach-Object { $_.info.id + ":" + ($_.parts | ForEach-Object { $_.type + ":" + $_.text }) }) -join '|'
-if ($a1Str -eq $a2Str) { Write-Host "SESION QUIETA -> puede estar atascado" }
-else                   { Write-Host "SESION CRECIENDO -> sigue trabajando, no intervenir" }
+if ($a1Str -eq $a2Str) { Write-Host "SESSION IDLE -> may be stuck" }
+else                   { Write-Host "SESSION GROWING -> still working, do not intervene" }
 ```
 
-> Alternativa rápida: el resumen de la sesión también expone el tamaño
-> (`GET /session` → `tokens` y `summary`). Si `tokens.output` o `summary`
-> cambian entre lecturas, el agente está activo.
+> Quick alternative: the session summary also exposes the size
+> (`GET /session` → `tokens` and `summary`). If `tokens.output` or `summary`
+> change between readings, the agent is active.
 
-### c) Despertar al agente atascado con "sigue"
+### c) Wake up a stuck agent with "sigue"
 
-Solo tras confirmar en (b) que la sesión **no crece**, si el agente está
-atascado o su respuesta quedó truncada, envíale `sigue` con `prompt_async`
-para que retome su turno y complete el envío:
+Only after confirming in (b) that the session **is not growing**, if the agent is
+stuck or its reply was truncated, send it `sigue` with `prompt_async`
+so that it resumes its turn and completes the send:
 
 ```powershell
 $body = '{"parts":[{"type":"text","text":"sigue"}]}'
@@ -540,859 +540,858 @@ $body | Set-Content "$env:TEMP\msg.json" -Encoding ascii -NoNewline
 
 curl.exe -s -X POST -u "opencode:$password" -H "Content-Type: application/json" `
   --data-binary "@$env:TEMP\msg.json" `
-  "http://127.0.0.1:$port/session/$asesor/prompt_async"
+  "http://127.0.0.1:$port/session/$advisor/prompt_async"
 ```
 
-> `sigue` sin `noReply` despierta al agente y le hace continuar su trabajo. Es
-> una forma segura de reactivar un asesor parado sin perder su contexto. **No se
-> envía si la sesión sigue creciendo (b): interrumpiría su trabajo.**
+> `sigue` without `noReply` wakes up the agent and makes it continue its work. It is
+> a safe way to reactivate a stalled advisor without losing its context. **Do NOT
+> send it if the session is still growing (b): it would interrupt its work.**
 >
-> **`sigue` es RESUME (v1.6.1, corrección revisión externa 2026-08-11):** NO es
-> una retransmisión del mensaje lógico. `sigue` es una instrucción dirigida a la
-> **sesión existente** para que continúe su contexto; NO lleva `msg_id` (ni
-> `run_id`, ni `token`). Por tanto NO participa en la idempotencia de 12.8 ni en
-> RECONCILE (12.10) a nivel de mensaje. Distinción de identidades (12.1):
-> - **RESUME** (`sigue`): misma sesión + mismo contexto + `task_id` implícito
->   (la tarea en curso). El agente continúa donde estaba.
-> - **RETRY**: retransmisión del MISMO mensaje lógico con el MISMO `msg_id`
->   (idempotente). Se usa SOLO en 12.10 (scan RETRY) cuando el paso es
->   idempotente y el mensaje puede reenviarse desde cero.
+> **`sigue` is RESUME (v1.6.1, external review correction 2026-08-11):** it is NOT
+> a retransmission of the logical message. `sigue` is an instruction directed at the
+> **existing session** to continue its context; it does NOT carry `msg_id` (nor
+> `run_id`, nor `token`). Therefore it does NOT participate in the idempotency of 12.8 nor in
+> RECONCILE (12.10) at the message level. Identity distinction (12.1):
+> - **RESUME** (`sigue`): same session + same context + implicit `task_id`
+>   (the current task). The agent continues where it left off.
+> - **RETRY**: retransmission of the SAME logical message with the SAME `msg_id`
+>   (idempotent). Used ONLY in 12.10 (RETRY scan) when the step is
+>   idempotent and the message can be resent from scratch.
 >
-> **Pitfall probado (2026-08-10, tarea Buda):** un asesor atascado (model-e)
-> se quedó parado DOS veces en la misma tarea, y tras un `sigue` se quedó de
-> nuevo con un `assistant` vacío. La respuesta tardó ~1-2 min en completarse.
-> Pauta: tras enviar `sigue`, vuelve a esperar y a comprobar (b). No envíes
-> `sigue` en bucle rápido: espera ~30-60 s entre reintentos y verifica que la
-> sesión está quieta otra vez antes de repetirlo. Un `sigue` nuevo mientras el
-> agente aún está procesando (o ha encolado otro) puede confundir el turno.
+> **Tested pitfall (2026-08-10, Buda task):** a stuck advisor (model-e)
+> stalled TWICE on the same task, and after a `sigue` it ended up with an
+> empty `assistant` again. The reply took ~1-2 min to complete.
+> Guideline: after sending `sigue`, wait and check again (b). Do not send
+> `sigue` in a rapid loop: wait ~30-60 s between retries and verify that the
+> session is idle again before repeating. A new `sigue` while the agent is
+> still processing (or has enqueued another) may confuse the turn.
 
-> **Pitfall auto-continuación (probado 2026-08-10, tarea Bugs TXBridge):** el
-> propio entorno inyecta mensajes automáticos tipo "Continue if you have next
-> steps, or stop and ask for clarification" que **descarrilan** a algunos
-> asesores: model-d los interpretó como "resume lo hecho" y respondió con un
-> resumen (o preguntando si arreglaba bugs) en lugar de entregar su informe.
-> Pauta: si un asesor responde "resumiendo" sin entregar la tarea, comprueba si
-> hubo un mensaje automático de estos; envía un **nudge explícito y firme**
-> (por ejemplo: "NO resumas ni arregles nada. Entrega YA el informe FINAL
-> completo con firma `TOKEN:...`") con `prompt_async` (4c), y advierte que el
-> mensaje automático "Continue..." debe ignorarse.
+> **Auto-continuation pitfall (tested 2026-08-10, Bugs TXBridge task):** the
+> environment itself injects automatic messages like "Continue if you have next
+> steps, or stop and ask for clarification" that **derail** some
+> advisors: model-d interpreted them as "resume what you did" and replied with a
+> summary (or asking if it should fix bugs) instead of delivering its report.
+> Guideline: if an advisor replies "summarizing" without delivering the task, check if
+> there was one of these automatic messages; send an **explicit and firm
+> nudge** (e.g.: "DO NOT summarize or fix anything. Deliver the FINAL report
+> NOW, complete, with signature `TOKEN:...`") with `prompt_async` (4c), and warn that the
+> automatic "Continue..." message should be ignored.
 
-### d) Ventanas de espera (no esperes indefinidamente)
+### d) Waiting windows (do not wait indefinitely)
 
-- **Contribuciones (ronda 1):** espera como máximo 3 minutos; si falta alguna,
-  comprueba si el ausente sigue activo (b); solo si su sesión está quieta,
-  envíale `sigue` (c).
-- **Acuerdos finales:** mismo criterio, 3 minutos; los asesores suelen
-  responder en segundos.
-- **Regla de partición (v1.6.1, simplificación):** mensajes con ACK →
-  **§12.3 gobierna completamente** (120s, decisión por dos señales, sin backoff).
-  Mensajes sin ACK → **este apartado gobierna** (3 min). No hay que interpretar
-  ambas reglas simultáneamente: el ACK es la frontera.
-- **Antes de cualquier `sigue`:** verifica siempre que la sesión no crece entre
-  dos lecturas (b). Si crece, espera y vuelve a comprobar.
-- No reintentes la tarea completa: primero diagnostica (a) y comprueba (b).
+- **Contributions (round 1):** wait at most 3 minutes; if any are missing,
+  check if the absent one is still active (b); only if its session is idle,
+  send it `sigue` (c).
+- **Final agreements:** same criterion, 3 minutes; advisors usually
+  reply within seconds.
+- **Partition rule (v1.6.1, simplification):** messages with ACK →
+  **§12.3 governs completely** (120s, decision by two signals, no backoff).
+  Messages without ACK → **this section governs** (3 min). There is no need to interpret
+  both rules simultaneously: the ACK is the boundary.
+- **Before any `sigue`:** always verify that the session is not growing between
+  two readings (b). If it grows, wait and check again.
+- Do not retry the entire task: diagnose first (a) and check (b).
 
-### e) Monitoreo externo del líder y aviso desde el propio chat (v1.2)
+### e) External monitoring by the leader and notice from own chat (v1.2)
 
-> **Regla que TODO agente debe conocer (v1.2, 2026-08-10):**
+> **Rule that EVERY agent must know (v1.2, 2026-08-10):**
 >
-> 1. **El agente que encarga la tarea (el líder) puede leer tu sesión desde
->    fuera** con `GET /session/<TU_ID>/message` (sección 6.1a) y consultar tu
->    estado con `GET /session/<TU_ID>` (sección 10.1). No tienes privacidad
->    frente al líder durante la tarea: si tu sesión queda quieta o vacía, lo
->    detectará.
-> 2. **Si NO puedes completar la tarea** (proveedor caído, error, no sabes cómo
->    seguir), **escríbelo en tu propio chat** (tu conversación, mensaje normal,
->    sin comandos): el líder lo verá al leer tu sesión y te enviará ayuda
->    (instrucciones, script listo para copiar o un `sigue`).
-> 3. **No intentes ejecutar comandos a ciegas** para "arreglar" un envío que
->    falla: si llevas varios intentos fallidos, detente y avisa en tu chat con
->    un texto plano (ver problema 11.6).
-> 4. **Un `assistant` vacío** en tu sesión es la señal que el líder usa para
->    saber que algo falló: si tu respuesta está quedando vacía, acláralo en
->    texto dentro de tu propia conversación para no generar una racha de
->    mensajes vacíos.
-> 5. **Si el problema es de CONECTIVIDAD** (no puedes enviar a la sesión del
->    líder, HTTP 5xx repetidos), escribe en tu chat el **error HTTP exacto**
->    (código y mensaje, p. ej. `HTTP 500 Unexpected server error`). El líder lo
->    usará para diagnosticar si el fallo es del servidor o del agente.
+> 1. **The agent that assigns the task (the leader) can read your session from
+>    outside** using `GET /session/<YOUR_ID>/message` (section 6.1a) and check your
+>    status with `GET /session/<YOUR_ID>` (section 10.1). You have no privacy
+>    from the leader during the task: if your session goes idle or empty, they
+>    will detect it.
+> 2. **If you CANNOT complete the task** (provider down, error, you don't know how
+>    to continue), **write it in your own chat** (your conversation, normal message,
+>    no commands): the leader will see it when reading your session and will send you help
+>    (instructions, a ready-to-copy script, or a `sigue`).
+> 3. **Do not try to run commands blindly** to "fix" a failed
+>    send: if you have several failed attempts, stop and notify in your chat with
+>    plain text (see problem 11.6).
+> 4. **An empty `assistant`** in your session is the signal the leader uses to
+>    know something went wrong: if your reply is coming up empty, explain it in
+>    text within your own conversation to avoid generating a streak of
+>    empty messages.
+> 5. **If the problem is CONNECTIVITY** (you cannot send to the leader's
+>    session, repeated HTTP 5xx), write in your chat the **exact HTTP
+>    error** (code and message, e.g. `HTTP 500 Unexpected server error`). The leader will
+>    use it to diagnose whether the failure is the server's or the agent's.
 
-## 7. Confirmación de entrega (ACK)
+## 7. Delivery confirmation (ACK)
 
-> **Consenso (Rondas de mejora 2026-08-10):** para garantizar que un mensaje fue
-> **procesado** (no solo recibido por el servidor), se usa un token ACK.
-> El ACK complementa la verificación por ventana (sección 6): la ventana detecta
-> la respuesta final; el ACK detecta el procesamiento inicial.
+> **Consensus (Improvement Rounds 2026-08-10):** to guarantee that a message was
+> **processed** (not just received by the server), an ACK token is used.
+> The ACK complements the window verification (section 6): the window detects
+> the final reply; the ACK detects the initial processing.
 
-### 7.1. Formato del ACK
+### 7.1. ACK format
 
 ```
-ACK:<token_original>:<ID_SESION_EMISORA>:<MODELO_EMISOR>
+ACK:<original_token>:<SENDER_SESSION_ID>:<SENDER_MODEL>
 ```
 
-Ejemplo: si el líder envía la tarea con token `PROPUESTA-R1` y el asesor
-`ses_BBBBBBBB` (modelo `model-b`) la procesa, el asesor envía:
+Example: if the leader sends the task with token `PROPUESTA-R1` and the advisor
+`ses_BBBBBBBB` (model `model-b`) processes it, the advisor sends:
 
 ```
 ACK:PROPUESTA-R1:ses_BBBBBBBB:model-b
 ```
 
-> **Aclaración (v1.3, consenso asesores 2026-08-10):** el ACK se construye sobre
-> el **token completo recibido** (incluido su sufijo, si lo tenía) y añade al
-> final el ID y el modelo **del emisor del ACK**:
-> `ACK:<token_completo_recibido>:<ID_DEL_ACK>:<MODELO_DEL_ACK>`. El modelo va
-> **siempre en último lugar**, separado por `:`. Así el emisor original sabe
-> quién (qué modelo) le confirmó. El parsing debe tolerar 3 o 4 segmentos
-> (`ACK:token:ID` sin modelo, o `ACK:token:ID:modelo`).
+> **Clarification (v1.3, advisor consensus 2026-08-10):** the ACK is built on
+> the **full received token** (including its suffix, if any) and appends at
+> the end the ID and model **of the ACK sender**:
+> `ACK:<full_received_token>:<ACK_SENDER_ID>:<ACK_SENDER_MODEL>`. The model goes
+> **always at the end**, separated by `:`. This way the original sender knows
+> who (which model) confirmed. The parser must tolerate 3 or 4 segments
+> (`ACK:token:ID` without model, or `ACK:token:ID:model`).
 
-El modelo es opcional pero recomendado: hace legible para el usuario humano qué
-modelo confirmó el procesamiento (sección 4d). El ID de sesión es el
-identificador canónico para el conteo de votos.
+The model is optional but recommended: it makes it human-readable which
+model confirmed the processing (section 4d). The session ID is the
+canonical identifier for vote counting.
 
-### 7.2. Cuándo enviar el ACK
+### 7.2. When to send the ACK
 
-- El agente receptor envía el ACK como **primer paso** al procesar un mensaje de
-  otra sesión, **antes** de su respuesta o contribución.
-- El ACK se envía a la sesión del emisor usando `POST /session/<ID_ORIGEN>/message`
-  (sección 5) o el wrapper `send_message.ps1` (4e), típicamente con `noReply: true`.
-- El ACK confirma: *"recibí tu mensaje y lo estoy procesando"*.
+- The receiving agent sends the ACK as its **first step** when processing a message from
+  another session, **before** its reply or contribution.
+- The ACK is sent to the sender's session using `POST /session/<ORIGIN_ID>/message`
+  (section 5) or the `send_message.ps1` wrapper (4e), typically with `noReply: true`.
+- The ACK confirms: *"I received your message and I am processing it"*.
 
-### 7.3. Timeout y reintentos (lado del emisor)
+### 7.3. Timeout and retries (sender side)
 
-Al enviar un mensaje que requiere confirmación:
+When sending a message that requires confirmation:
 
-1. Esperar máximo **30 segundos** por el ACK.
-2. Si no llega, reintentar el envío del mensaje original.
-3. Backoff exponencial: **30s, 60s, 120s** (3 reintentos máximo).
-4. Tras 3 fallos, usar el mecanismo **`sigue`** (sección 6.1c) como fallback y
-   registrar el fallo en `audit_log.md` (sección 9).
+1. Wait at most **30 seconds** for the ACK.
+2. If it does not arrive, retry sending the original message.
+3. Exponential backoff: **30s, 60s, 120s** (3 retries max).
+4. After 3 failures, use the **`sigue`** mechanism (section 6.1c) as fallback and
+   log the failure in `audit_log.md` (section 9).
 
-> **Precedencia v1.6 (2026-08-11):** este apartado describe el ACK clásico
-> (v1.1). Para mensajes con `requiere_ack=true` en el protocolo anti-sueño, el
-> plazo y la decisión los fija **§12.3**: 120 s FIJOS, SIN backoff — si la
-> sesión crece, renovar lease y esperar (no es fallo); si está quieta, aplicar
-> el circuit breaker (12.9). El backoff 30/60/120 de este apartado queda
-> **sustituido** por §12.3 para esos mensajes; este apartado solo sigue
-> aplicando a los reintentos del envío síncrono clásico (sección 4b) y a
-> tareas sin `requiere_ack`.
+> **Precedence v1.6 (2026-08-11):** this section describes the classic ACK
+> (v1.1). For messages with `requiere_ack=true` in the anti-sleep protocol, the
+> deadline and decision are set by **§12.3**: 120s FIXED, NO backoff — if the
+> session grows, renew lease and wait (it is not a failure); if idle, apply
+> the circuit breaker (12.9). The 30/60/120 backoff in this section is
+> **replaced** by §12.3 for those messages; this section only continues
+> to apply to classic synchronous send retries (section 4b) and
+> tasks without `requiere_ack`.
 
-### 7.4. Cuándo NO usar ACK
+### 7.4. When NOT to use ACK
 
-- En tareas simples de una sola respuesta (ej: "describe quién es Buda"), el ACK
-  es opcional: la respuesta misma confirma el procesamiento.
-- En tareas coordinadas con múltiples rondas, el ACK es **recomendado** para
-  detectar atascos temprano.
-- El emisor puede solicitar ACK explícitamente incluyendo `[ACK requerido]` en
-  el mensaje. Si no se pide, el receptor no envía ACK.
-- **Los mensajes `noReply` NO requieren ACK** (son *fire-and-forget*): solo las
-  propuestas, acuerdos, cambios y reclamos exigen confirmación.
+- In simple single-reply tasks (e.g. "describe who Buddha is"), the ACK
+  is optional: the reply itself confirms processing.
+- In coordinated multi-round tasks, the ACK is **recommended** to
+  detect stuck agents early.
+- The sender can explicitly request an ACK by including `[ACK requerido]` in
+  the message. If not requested, the receiver does not send an ACK.
+- **`noReply` messages do NOT require ACK** (they are *fire-and-forget*): only
+  proposals, agreements, changes, and claims require confirmation.
 
-### 7.5. NACK explícito: el asesor NO puede hacer la tarea (v1.6.1, external-reviewer)
+### 7.5. Explicit NACK: the advisor CANNOT do the task (v1.6.1, external-reviewer)
 
-Un asesor que **no puede** procesar el mensaje lo declara con un NACK en lugar
-de procesar a ciegas o quedarse en silencio. Es el canal canónico para fallos
-por CAPACIDAD (no solo por conectividad, que se avisa en el propio chat, 6.1e):
-
-```
-NACK:<token_original>:<ID_SESION_EMISORA>:<MODELO_EMISOR>:<RAZON>
-```
-
-**Formato enriquecido (v1.7, corrección external-reviewer BUG A — trazabilidad del mensaje
-rechazado):** el emisor del NACK puede añadir el `msg_id` y `run_id` originales
-del sobre recibido (12.1), para que el líder correlacione sin ambigüedad:
+An advisor that **cannot** process the message declares it with a NACK instead
+of processing blindly or remaining silent. It is the canonical channel for
+CAPACITY failures (not just connectivity, which is reported in the chat itself, 6.1e):
 
 ```
-NACK:<token_original>:<ID_SESION_EMISORA>:<MODELO_EMISOR>:<RAZON>:<msg_id>:<run_id>
+NACK:<original_token>:<SENDER_SESSION_ID>:<SENDER_MODEL>:<REASON>
 ```
 
-El parser del motor (`Parse-CrossAckText`) detecta 6 segmentos y extrae
-`msg_id`/`run_id`; los 4-5 segmentos siguen siendo válidos (superset, sin
+**Enriched format (v1.7, external-reviewer BUG A correction — traceability of the rejected
+message):** the NACK sender can add the original `msg_id` and `run_id`
+from the received envelope (12.1), so the leader correlates without ambiguity:
+
+```
+NACK:<original_token>:<SENDER_SESSION_ID>:<SENDER_MODEL>:<REASON>:<msg_id>:<run_id>
+```
+
+The engine's parser (`Parse-CrossAckText`) detects 6 segments and extracts
+`msg_id`/`run_id`; 4-5 segments remain valid (superset, no
 breaking change).
 
-**Razones cerradas (enumeración fija, sin texto libre — el líder las clasifica):**
+**Closed reasons (fixed enumeration, no free text — the leader classifies them):**
 
-| Razon | Significado |
+| Reason | Meaning |
 |---|---|
-| `CAPACITY` | No puedo completarlo (contexto agotado, tarea demasiado grande) |
-| `TOOL_MISSING` | No tengo la herramienta/ruta/permiso que requiere la tarea |
-| `AMBIGUOUS_TASK` | La tarea es ambigua y no puedo ejecutarla con seguridad |
-| `PROVIDER_DOWN` | Mi proveedor/modelo está caído (fallo técnico, no de capacidad) |
-| `OTHER` | Cualquier otra razón (aclarar en el mensaje o en el chat) |
+| `CAPACITY` | I cannot complete it (context exhausted, task too large) |
+| `TOOL_MISSING` | I do not have the tool/path/permission the task requires |
+| `AMBIGUOUS_TASK` | The task is ambiguous and I cannot execute it safely |
+| `PROVIDER_DOWN` | My provider/model is down (technical failure, not capacity) |
+| `OTHER` | Any other reason (clarify in the message or in the chat) |
 
-Reglas:
-- El NACK se envía por API a la sesión del emisor (igual que el ACK), con
-  `noReply: true`, en cuanto se detecta la imposibilidad (no esperar el timeout).
-- El emisor/leader recibe el NACK y decide según la razón (tabla abajo):
-  **reasignar** a otro asesor (misma tarea, nuevo `msg_id` o mismo según 12.5),
-  **abortar**, o **escalar al humano** (DLQ con `flag`, ver 12.7). Marca el
-  outbox en consecuencia (`ESTADO=NACKED`).
-- Un NACK no es un fallo del agente: es información operativa. No penalizar al
-  emisor del NACK.
-- El NACK también se usa en el handshake de protocolo (4d):
-  `NACK-PROTOCOLO:version_no_soportada:<versión_recibida>`.
+Rules:
+- The NACK is sent via API to the sender's session (same as the ACK), with
+  `noReply: true`, as soon as the impossibility is detected (do not wait for timeout).
+- The sender/leader receives the NACK and decides based on the reason (table below):
+  **reassign** to another advisor (same task, new `msg_id` or same per 12.5),
+  **abort**, or **escalate to human** (DLQ with `flag`, see 12.7). Mark the
+  outbox accordingly (`ESTADO=NACKED`).
+- A NACK is not an agent failure: it is operational information. Do not penalize the
+  NACK sender.
+- The NACK is also used in the protocol handshake (4d):
+  `NACK-PROTOCOLO:unsupported_version:<received_version>`.
 
-**Acción recomendada del líder por razón (v1.6.1, corrección external-reviewer F3):**
+**Recommended leader action by reason (v1.6.1, external-reviewer F3 correction):**
 
-| NACK reason | Acción recomendada del líder |
+| NACK reason | Recommended leader action |
 |---|---|
-| `CAPACITY` | Reasignar a otro asesor; si reasigna, NO incrementar `attempt` (no es una entrega nueva idempotente, 12.1) |
-| `TOOL_MISSING` | Líder provee la ruta/herramienta en el reenvío (8.2) o reasigna a un asesor que la tenga |
-| `AMBIGUOUS_TASK` | Líder reformula la tarea y reenvía con NUEVO `msg_id` (es nueva entrega, no RETRY) |
-| `PROVIDER_DOWN` | No reasignar a otro proveedor inmediatamente; esperar (12.3, si la sesión crece) o excluir de esta ronda |
-| `OTHER` | Reportar al humano en DLQ con `flag=HUMAN_REVIEW` |
+| `CAPACITY` | Reassign to another advisor; if reassigning, do NOT increment `attempt` (it is not a new idempotent delivery, 12.1) |
+| `TOOL_MISSING` | Leader provides the path/tool in the retry (8.2) or reassigns to an advisor that has it |
+| `AMBIGUOUS_TASK` | Leader reformulates the task and resends with a NEW `msg_id` (it is a new delivery, not RETRY) |
+| `PROVIDER_DOWN` | Do not reassign to another provider immediately; wait (12.3, if the session grows) or exclude from this round |
+| `OTHER` | Report to human in DLQ with `flag=HUMAN_REVIEW` |
 
-### 7.6. Relación con el mecanismo existente
+### 7.6. Relationship with existing mechanism
 
-El ACK es complementario a la verificación por ventana (sección 6). La
-verificación por ventana detecta la respuesta final; el ACK detecta el
-procesamiento inicial. Usar ambos en tareas críticas; usar solo verificación por
-ventana en tareas simples.
+The ACK is complementary to the window verification (section 6). The
+window verification detects the final reply; the ACK detects the
+initial processing. Use both in critical tasks; use only window verification
+in simple tasks.
 
-## 8. Protocolo de coordinación entre sesiones (tareas colaborativas)
+## 8. Inter-session coordination protocol (collaborative tasks)
 
-Para tareas que ambas sesiones deben resolver y acordar:
+For tasks that both sessions must resolve and agree on:
 
-1. **Propuesta:** envía tu borrador a la otra sesión con `prompt_async`,
-   incluyendo un **token de ronda** único (p. ej. `PROPUESTA-R1`).
-2. **Contribución:** si quieres que la otra sesión APORTE algo, díselo
-   EXPLÍCITAMENTE en el mensaje (qué puede corregir, añadir o quitar). Si solo
-   se le pide aceptar, tiende a responder "de acuerdo" sin trabajar.
-3. **Respuesta:** la otra sesión te responde a TU sesión usando la sección 5,
-   con el token y, si procede, su versión revisada. **Añade el ID de la sesión
-   emisora al token** (`TOKEN:ses_XXXXXX`) para poder contar votos por agente.
-   **Si no recibes su respuesta, no era una respuesta válida: reclamale que la
-   envíe a tu sesión por API (sección 5), no que la escriba en su chat.**
-4. **Integración:** integra su aporte, corrige el mojibake (`?`) si aparece,
-   y envía la versión final pidiendo un token de acuerdo explícito
-   (p. ej. `ACUERDO-FINAL`).
-5. **Verificación:** sondea tu sesión (sección 6) hasta recibir el token de
-   acuerdo o una contrapropuesta. Si tras 3 minutos falta algún asesor: lee su
-   sesión (6.1a), comprueba que ya no crece (6.1b) y, solo entonces, envíale
-   `sigue` (6.1c). No esperes ni reinicies sin diagnosticar.
-6. Repite 1-5 hasta recibir el acuerdo explícito de ambas.
+1. **Proposal:** send your draft to the other session with `prompt_async`,
+   including a unique **round token** (e.g. `PROPUESTA-R1`).
+2. **Contribution:** if you want the other session to CONTRIBUTE something, tell it
+   EXPLICITLY in the message (what it can correct, add, or remove). If you only
+   ask it to accept, it tends to reply "agreed" without working.
+3. **Reply:** the other session replies to YOUR session using section 5,
+   with the token and, if applicable, its revised version. **Append the sender's session
+   ID to the token** (`TOKEN:ses_XXXXXX`) to count votes per agent.
+   **If you do not receive its reply, it was not a valid reply: ask it to
+   send it to your session via API (section 5), not to write it in its chat.**
+4. **Integration:** integrate its contribution, fix any mojibake (`?`) if present,
+   and send the final version requesting an explicit agreement token
+   (e.g. `ACUERDO-FINAL`).
+5. **Verification:** poll your session (section 6) until you receive the agreement
+   token or a counter-proposal. If after 3 minutes an advisor is missing: read its
+   session (6.1a), verify it is no longer growing (6.1b) and, only then, send it
+   `sigue` (6.1c). Do not wait or restart without diagnosing.
+6. Repeat 1-5 until you receive explicit agreement from both.
 
-Los tokens hacen que la verificación sea inequívoca: filtran el ruido
-(mensajes antiguos o duplicados) y confirman que la otra sesión llegó al
-acuerdo. Ejemplo real verificado: propuesta → la otra sesión aportó 3 mejoras
-→ integración → `ACUERDO-FINAL`.
+Tokens make verification unambiguous: they filter out noise
+(old or duplicate messages) and confirm that the other session reached
+agreement. Real verified example: proposal → the other session contributed 3 improvements
+→ integration → `ACUERDO-FINAL`.
 
-### 8.1. Análisis de proyectos grandes (no agotes el contexto)
+### 8.1. Analysis of large projects (do not exhaust context)
 
-Cuando el código a analizar supera el contexto disponible (v1.5, aporte
-model-c), NO intentes leer todos los archivos completos:
+When the code to analyze exceeds the available context (v1.5, model-c
+contribution), do NOT try to read all complete files:
 
-1. **Prioriza los archivos clave:** main/orquestador, headers públicos
-   (`AudioEngine.h`, `AudioDevice.h`), y los módulos que concentran la lógica.
-   Los `.cpp` grandes (p. ej. `ui/App.cpp`) se leen de forma selectiva por
-   sección/offset según lo que busques.
-2. **Usa herramientas de búsqueda** (Grep/Select-String, Glob) para localizar
-   símbolos, call-sites y patrones en vez de leer archivos enteros.
-3. **El líder debe indicar en el mensaje de la tarea los archivos prioritarios**
-   y las líneas/rangos a revisar cuando los conozca (sección 4d), para que el
-   asesor no malgaste contexto.
-4. Si un archivo es enorme y solo afecta una zona, verifica la zona concreta y
-   anota qué parte quedó sin revisar en vez de leerlo entero.
+1. **Prioritize key files:** main/orchestrator, public headers
+   (`AudioEngine.h`, `AudioDevice.h`), and the modules that concentrate the logic.
+   Large `.cpp` files (e.g. `ui/App.cpp`) are read selectively by
+   section/offset depending on what you are looking for.
+2. **Use search tools** (Grep/Select-String, Glob) to locate
+   symbols, call sites, and patterns instead of reading entire files.
+3. **The leader must specify in the task message the priority files**
+   and lines/ranges to review when known (section 4d), so that the
+   advisor does not waste context.
+4. If a file is huge and only affects one area, verify the specific area and
+   note which part was left unreviewed instead of reading the whole thing.
 
-### 8.2. Localización de herramientas del entorno (pitfall probado: Python)
+### 8.2. Environment tool location (tested pitfall: Python)
 
-A veces los modelos no encuentran las herramientas o usan una ruta equivocada.
-Pitfall real (2026-08-10): `python` en el PATH de este sistema es el **stub de
-Windows Store** (`C:\WINDOWS\system32\python`) que NO ejecuta nada (devuelve
-vacío en silencio). model-d no pudo usar Python hasta que el usuario humano le
-indicó la ruta real. Por eso:
+Sometimes models cannot find the tools or use the wrong path.
+Real pitfall (2026-08-10): `python` in this system's PATH is the **Windows Store
+stub** (`C:\WINDOWS\system32\python`) that does NOT execute anything (returns
+empty silently). model-d could not use Python until the human user told it
+the real path. Therefore:
 
-1. **Python real:** la ruta completa de tu instalación de Python (ver `where python` o `py -0p`)
-   — NO usar `python` a secas ni `py`. Invocar siempre con la ruta completa.
-2. **curl:** `C:\WINDOWS\system32\curl.exe` (funciona como `curl.exe`).
+1. **Real Python:** the full path of your Python installation (see `where python` or `py -0p`)
+   — do NOT use bare `python` or `py`. Always invoke with the full path.
+2. **curl:** `C:\WINDOWS\system32\curl.exe` (works as `curl.exe`).
 3. **git:** `C:\Program Files\Git\cmd\git.exe`.
 4. **CMake:** `C:\Program Files\CMake\bin\cmake.exe`.
 5. **GCC/G++ (MSYS2 UCRT64):** `C:\msys64\ucrt64\bin\g++.exe` / `gcc.exe`
-   (toolchain real del build desktop; ver AGENTS.md del proyecto).
-6. **Wrapper de envío:** `whiteboard\send_message.ps1` (autodetecta credenciales).
+   (real desktop build toolchain; see project AGENTS.md).
+6. **Send wrapper:** `whiteboard\send_message.ps1` (auto-detects credentials).
 
-> Si el líder entrega una tarea que requiere una herramienta, debe indicar su
-> **ruta completa** en el mensaje (sección 4d) y no asumir que el asesor la
-> encontrará. Si un asesor no puede usar una herramienta, que lo avise por chat
-> (6.1e) en vez de quedarse bloqueado o usar una ruta incorrecta.
+> If the leader delivers a task that requires a tool, it must specify its
+> **full path** in the message (section 4d) and not assume the advisor will
+> find it. If an advisor cannot use a tool, it should notify in the chat
+> (6.1e) instead of staying blocked or using an incorrect path.
 
-## 9. Trazabilidad y auditoría (`audit_log.md`)
+## 9. Traceability and auditing (`audit_log.md`)
 
-> **Consenso (Rondas de mejora 2026-08-10):** un único registro compartido da
-> trazabilidad de quién dijo qué y cuándo. El nombre canónico es
-> `whiteboard/audit_log.md` (una alternativa propuesta, `tracking.md`, quedó en
-> minoría). Archivo *append-only*, uno por sesión de trabajo.
+> **Consensus (Improvement Rounds 2026-08-10):** a single shared record provides
+> traceability of who said what and when. The canonical name is
+> `whiteboard/audit_log.md` (an alternative proposed, `tracking.md`, was in
+> the minority). Append-only file, one per work session.
 
-### 9.1. Formato de cada línea
+### 9.1. Format of each line
 
 ```
-| YYYY-MM-DD HH:MM:SS | ORIGEN | DESTINO | TOKEN | MODELO | TIPO | ESTADO | NOTA |
+| YYYY-MM-DD HH:MM:SS | ORIGIN | DESTINATION | TOKEN | MODEL | TYPE | STATUS | NOTE |
 ```
 
-- **MODELO** (v1.3): modelo del emisor del mensaje (p. ej. `model-b`).
-  Opcional: si no se conoce, dejar vacío.
-- **TIPO** (válidos, v1.6.1 corrección external-reviewer F4): `PROPUESTA`, `ACUERDO`,
+- **MODEL** (v1.3): model of the message sender (e.g. `model-b`).
+  Optional: if unknown, leave empty.
+- **TYPE** (valid, v1.6.1 external-reviewer F4 correction): `PROPUESTA`, `ACUERDO`,
   `CAMBIO`, `RECLAMO`, `ACK`, `ACK-PROTOCOLO`, `NACK`, `NACK-PROTOCOLO`,
   `HEARTBEAT`, `REACTIVACION`, `ENV`, `REC`, `RESP`, `SIGUE`, `CLAIM`, `DONE`,
   `RELEASE`.
-- **ESTADO** (válidos): `PENDIENTE`, `ENTREGADO`, `CONFIRMADO`, `FALLIDO`,
+- **STATUS** (valid): `PENDIENTE`, `ENTREGADO`, `CONFIRMADO`, `FALLIDO`,
   `REINTENTANDO`.
-- **NOTA**: máximo ~80 caracteres, sin acentos (ASCII plano).
-- Separador: pipe `|`.
+- **NOTE**: max ~80 characters, no accents (plain ASCII).
+- Separator: pipe `|`.
 
-Ejemplo:
+Example:
 
 ```
-| 2026-08-10 15:30:12 | ses_AAAAAAAA | ses_BBBBBBBB | PROPUESTA-R1 | leader-model | ENV | ENTREGADO | Tarea: analisis workspace |
-| 2026-08-10 15:30:18 | ses_BBBBBBBB | ses_AAAAAAAA | ACK:PROPUESTA-R1:ses_BBBBBBBB:model-b | model-b | ACK | CONFIRMADO | Recibido y procesando |
-| 2026-08-10 15:31:45 | ses_BBBBBBBB | ses_AAAAAAAA | MEJORA-R1:ses_BBBBBBBB:model-b | model-b | RESP | ENTREGADO | 3 mejoras propuestas |
+| 2026-08-10 15:30:12 | ses_AAAAAAAA | ses_BBBBBBBB | PROPUESTA-R1 | leader-model | ENV | DELIVERED | Task: workspace analysis |
+| 2026-08-10 15:30:18 | ses_BBBBBBBB | ses_AAAAAAAA | ACK:PROPUESTA-R1:ses_BBBBBBBB:model-b | model-b | ACK | CONFIRMED | Received and processing |
+| 2026-08-10 15:31:45 | ses_BBBBBBBB | ses_AAAAAAAA | MEJORA-R1:ses_BBBBBBBB:model-b | model-b | RESP | DELIVERED | 3 improvements proposed |
 ```
 
-> **Firma con modelo (v1.2):** los tokens llevan el sufijo
-> `:<MODELO>` además de `:<ID_SESION>` (sección 4d), para que el usuario humano
-> lea el modelo de un vistazo. En el log, la columna MODELO lo hace explícito.
+> **Signature with model (v1.2):** tokens carry the suffix
+> `:<MODEL>` in addition to `:<SESSION_ID>` (section 4d), so that the human user
+> can read the model at a glance. In the log, the MODEL column makes it explicit.
 
-### 9.2. Regla
+### 9.2. Rule
 
-Cada agente registra sus envíos y recepciones en `audit_log.md`. No es un
-requisito bloqueante, pero es la evidencia compartida para reconstruir el flujo
-de propuestas y acuerdos si algo se pierde.
+Each agent logs its sends and receives in `audit_log.md`. It is not a
+blocking requirement, but it is the shared evidence to reconstruct the flow
+of proposals and agreements if something is lost.
 
-## 10. Monitoreo de sesiones y tareas
+## 10. Session and task monitoring
 
-> **Consenso (Rondas de mejora 2026-08-10):** tres mecanismos complementarios,
-> cada uno con un rol distinto:
+> **Consensus (Improvement Rounds 2026-08-10):** three complementary mechanisms,
+> each with a distinct role:
 
-| Mecanismo | Rol | Cuándo usarlo |
+| Mechanism | Role | When to use |
 |---|---|---|
-| `GET /session/:id` (API, ya existe) | Estado técnico en vivo (activa, metadatos, tokens) | Polling rápido de presencia |
-| `whiteboard/task_status.md` | Tablero global de la tarea (en qué ronda va, quién respondió) | Actualizar por ronda, referencia para nuevos agentes |
-| Ventana de verificación + doble lectura (6.1b) | Diagnóstico de atascos | Antes de enviar `sigue` |
+| `GET /session/:id` (API, already exists) | Live technical status (active, metadata, tokens) | Fast presence polling |
+| `whiteboard/task_status.md` | Global task board (which round, who replied) | Update per round, reference for new agents |
+| Verification window + double reading (6.1b) | Diagnosis of stuck agents | Before sending `sigue` |
 
-### 10.1. Consulta rápida de estado con `GET /session/:id`
+### 10.1. Quick status query with `GET /session/:id`
 
-Verifica si una sesión está activa sin cargar el historial completo:
+Verify if a session is active without loading the full history:
 
 ```powershell
-curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session/<ID_SESION>"
+curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session/<SESSION_ID>"
 ```
 
-Retorna los metadatos de la sesión (`id`, `agent`, `model`, `time`, y si está
-disponible `tokens`/`summary`). Es el método preferido de polling ligero
-(1-2 s) en lugar de listar todas las sesiones y filtrar.
+Returns session metadata (`id`, `agent`, `model`, `time`, and if available
+`tokens`/`summary`). It is the preferred method for lightweight polling
+(1-2 s) instead of listing all sessions and filtering.
 
-### 10.2. Tablero de estado de tareas (`task_status.md`)
+### 10.2. Task status board (`task_status.md`)
 
-Vista global para el líder y para agentes nuevos que se unan a mitad de tarea.
-Se actualiza por ronda, no en tiempo real. Formato sugerido:
+Global view for the leader and for new agents joining mid-task.
+Updated per round, not in real time. Suggested format:
 
 ```
-# Estado de la tarea <NOMBRE>
-- Ronda: 2 de 5
-- Asesores: model-b (R2 ok), model-d (R2 ok), model-c (R2 ok), model-f (proveedor caido)
-- Pendiente: consenso final R3
+# Status of task <NAME>
+- Round: 2 of 5
+- Advisors: model-b (R2 ok), model-d (R2 ok), model-c (R2 ok), model-f (provider down)
+- Pending: final consensus R3
 ```
 
-> **Nota (consenso R3):** se eliminó el `heartbeat.json` propuesto en R1 por
-> condiciones de carrera (varios agentes escribiendo el mismo archivo) y porque
-> `GET /session/:id` ya cubre la presencia sin overhead.
+> **Note (R3 consensus):** the `heartbeat.json` proposed in R1 was removed due to
+> race conditions (multiple agents writing the same file) and because
+> `GET /session/:id` already covers presence without overhead.
 
-## 11. Problemas conocidos y soluciones
+## 11. Known issues and solutions
 
-> **Ampliado en v1.1** con los casos reales observados durante las rondas de
-> mejora (2026-08-10). Los pitfalls específicos de PowerShell/Windows están
-> consolidados en **`CROSS_WINDOWS.md`** (ex Apéndice B); aquí se conservan los
-> ítems 1, 2, 7 y 8 por numeración histórica (referencias cruzadas) y se
-> delega el detalle.
+> **Expanded in v1.1** with real cases observed during the improvement
+> rounds (2026-08-10). The PowerShell/Windows-specific pitfalls are
+> consolidated in **`CROSS_WINDOWS.md`** (formerly Appendix B); items 1,
+> 2, 7, and 8 are kept here for historical numbering (cross-references) and the
+> details are delegated.
 
-1. **JSON corrupto / HTTP 500** al usar `-d '...'` inline en PowerShell: usa
-   archivo + `--data-binary` (sección 4) o el wrapper (4e). Detalle:
+1. **Corrupted JSON / HTTP 500** when using `-d '...'` inline in PowerShell: use
+   file + `--data-binary` (section 4) or the wrapper (4e). Details:
    `CROSS_WINDOWS.md` #1.
-2. **Mojibake** (acentos como `?`): envía ASCII plano, corrige al integrar.
-   Detalle: `CROSS_WINDOWS.md` #2.
-3. **Agentes que responden solo en SU chat** sin enviar por API (sección 5):
-   reclama el envío, no la redacción.
-4. **Agentes atascados con `assistant` vacío:** verificar doble lectura (6.1b)
-   y `sigue` (6.1c); no lanzar `sigue` en bucle (esperar ~30-60 s).
-5. **Proveedor caído (no responde aunque se pida):** no es un atascamiento, es
-   un fallo de proveedor. Detectable porque el último `assistant` queda **vacío**
-   y creado **en milisegundos** tras el último `user` (un LLM no genera en
-   milisegundos), y `time.updated` no avanza. Registrar el evento (ver
-   `whiteboard/03_evento_north_mini.md`) y continuar con los agentes sanos.
-6. **Agente que intenta comandos fallidos repetidos:** puede producir una racha
-   de `assistant` vacíos. Leer su sesión, detectar la racha y enviarle **instrucción
-   explícita con script listo para copiar** (como en el caso de model-d en R3).
-7. **Rutas `/tmp/` en Windows:** no existen; usar `$env:TEMP`. Detalle:
+2. **Mojibake** (accents as `?`): send plain ASCII, fix when integrating.
+   Details: `CROSS_WINDOWS.md` #2.
+3. **Agents that reply only in THEIR chat** without sending via API (section 5):
+   demand the send, not the drafting.
+4. **Agents stuck with empty `assistant`:** verify with double reading (6.1b)
+   and `sigue` (6.1c); do not fire `sigue` in a loop (wait ~30-60 s).
+5. **Provider down (does not respond even when requested):** it is not a stuck agent, it is
+   a provider failure. Detectable because the last `assistant` is **empty**
+   and created **in milliseconds** after the last `user` (an LLM does not generate in
+   milliseconds), and `time.updated` does not advance. Log the event (see
+   `whiteboard/03_evento_north_mini.md`) and continue with the healthy agents.
+6. **Agent that attempts failed commands repeatedly:** may produce a streak
+   of empty `assistant` messages. Read its session, detect the streak and send it **explicit
+   instructions with a ready-to-copy script** (as in the model-d case in R3).
+7. **`/tmp/` paths on Windows:** they do not exist; use `$env:TEMP`. Details:
    `CROSS_WINDOWS.md` #4.
-8. **`&&` en PowerShell 5.1:** no existe; usar `;` o comandos separados.
-   Detalle: `CROSS_WINDOWS.md` #5.
-9. **Credenciales viejas hardcodeadas (v1.4, caso model-b):** un modelo envió su
-   voto con `$port = "56678"` y un password pegado literalmente; el servidor se
-   había reiniciado (puerto rotado a otro y password cambiado) y el mensaje
-   **no llegó** aunque el script reportó éxito. Regla: autodetección obligatoria
-   antes de CADA envío (sección 1) o usar el wrapper (4e), que ignora valores
-   fijos. Verificar con `GET /global/health` tras detectar.
+8. **`&&` in PowerShell 5.1:** it does not exist; use `;` or separate commands.
+   Details: `CROSS_WINDOWS.md` #5.
+9. **Hardcoded old credentials (v1.4, model-b case):** a model sent its
+   vote with `$port = "56678"` and a pasted literal password; the server had
+   restarted (port rotated to another and password changed) and the message
+   **did not arrive** even though the script reported success. Rule: mandatory
+   auto-detection before EACH send (section 1) or use the wrapper (4e), which ignores
+   fixed values. Verify with `GET /global/health` after detecting.
 
-## 12. Protocolo anti-sueño (v1.6, con correcciones v1.6.1)
+## 12. Anti-sleep protocol (v1.6, with v1.6.1 corrections)
 
-Objetivo: que NINGÚN mensaje quede dormido. Regla de oro heredada: SIEMPRE
-`prompt_async` SIN `noReply` para despertar (sección 5.1). Los archivos son
-RESCATE, no primario: la única primitiva que despierta al agente es
+Objective: ensure NO message goes to sleep. Inherited golden rule: ALWAYS
+`prompt_async` WITHOUT `noReply` to wake up (section 5.1). Files are
+RESCUE, not primary: the only primitive that wakes an agent is
 `prompt_async`.
 
-### 12.1 Sobre de mensaje estándar
+### 12.1 Standard message envelope
 
-Todo mensaje del líder a un asesor (y entre asesores) lleva este prefijo:
+Every message from the leader to an advisor (and between advisors) carries this prefix:
 
     [msg_id=msg_<emisor_short>_<YYYYMMDD-HHMMSS-RAND6> | run_id=ACTIVIDAD |
      token=TOKEN_ESPERADO | requiere_ack=true|false |
      lease=ses_A@UTC+3min|sucesor=ses_B | timestamp=ISO8601]
 
-**Identidades formales (v1.6.1, corrección revisión externa 2026-08-11):** el
-protocolo distingue cinco identidades independientes. Una misma tarea puede
-tener varios runs, varios mensajes y varios intentos; NO son intercambiables:
+**Formal identities (v1.6.1, external review correction 2026-08-11):** the
+protocol distinguishes five independent identities. A single task may
+have multiple runs, messages, and attempts; they are NOT interchangeable:
 
-| Identidad | Significado | Ejemplo | Se usa en |
+| Identity | Meaning | Example | Used in |
 |---|---|---|---|
-| `task_id` | La tarea lógica (un objetivo) | `TX-DSP-042` | resumen, DLQ, reportes |
-| `run_id` | Una ejecución concreta de la tarea | `RUN-20260811-01` | sobre (correlación) |
-| `msg_id` | Un mensaje lógico (idempotency key) | `msg_model-d_20260811-1512-a3f9` | outbox, 12.8, RETRY |
-| `attempt` | nº de intentos de envío de ese msg | `attempt=2` | backoff, circuit breaker |
-| `session_id` | La sesión de agente (proceso/contexto) | `ses_013b...` | enrutado, presencia |
+| `task_id` | The logical task (one objective) | `TX-DSP-042` | summary, DLQ, reports |
+| `run_id` | A concrete execution of the task | `RUN-20260811-01` | envelope (correlation) |
+| `msg_id` | A logical message (idempotency key) | `msg_model-d_20260811-1512-a3f9` | outbox, 12.8, RETRY |
+| `attempt` | Number of send attempts for that msg | `attempt=2` | backoff, circuit breaker |
+| `session_id` | The agent session (process/context) | `ses_013b...` | routing, presence |
 
-**Semántica de `attempt` (v1.6.1, corrección revisión externa):** `attempt` es
-el número de ENTREGAS del mensaje lógico (`msg_id`). Reglas:
-- **RETRY** → `attempt + 1` (es una nueva entrega del mismo `msg_id`).
-- **TRANSFER** (lease a sucesor) → `attempt + 1` (nueva entrega, aunque cambie
-  la `session_id`).
-- **RESUME** (`sigue`) → NO incrementa `attempt` (no es una entrega nueva: la
-  sesión ya tenía el mensaje y solo continúa su contexto).
-- `max_saltos=2` (12.5) y el circuit breaker A/B/C (12.9) leen este contador.
+**`attempt` semantics (v1.6.1, external review correction):** `attempt` is
+the number of DELIVERIES of the logical message (`msg_id`). Rules:
+- **RETRY** → `attempt + 1` (it is a new delivery of the same `msg_id`).
+- **TRANSFER** (lease to successor) → `attempt + 1` (new delivery, even if
+  `session_id` changes).
+- **RESUME** (`sigue`) → does NOT increment `attempt` (it is not a new delivery: the
+  session already had the message and is only continuing its context).
+- `max_hops=2` (12.5) and circuit breaker A/B/C (12.9) read this counter.
 
-- `msg_id`: ÚNICO por mensaje lógico. Incluye prefijo de la sesión emisora
-  (`msg_model-d_...`) para garantizar unicidad sin coordinación (ajuste model-d,
-  R3). Sirve de idempotency key, event_id y referencia en los archivos.
-- `run_id`: actividad actual (p. ej. `MEJORA-V16-R1`) para correlacionar.
-- `token`: lo que el asesor debe devolver firmado (`TOKEN:...:ID:MODELO`).
-- `requiere_ack`: `true` en tareas críticas; `false` en tareas simples
-  (regla 7.4).
-- `lease`: dueño + deadline UTC + **sucesor explícito** (no solo dueño y
-  deadline), para que el sobre sea autocontenido (ajuste model-a, R3).
+- `msg_id`: UNIQUE per logical message. Includes the sender session prefix
+  (`msg_model-d_...`) to guarantee uniqueness without coordination (model-d
+  adjustment, R3). Serves as idempotency key, event_id and file reference.
+- `run_id`: current activity (e.g. `MEJORA-V16-R1`) for correlation.
+- `token`: what the advisor must return signed (`TOKEN:...:ID:MODEL`).
+- `requiere_ack`: `true` in critical tasks; `false` in simple tasks
+  (rule 7.4).
+- `lease`: owner + UTC deadline + **explicit successor** (not just owner and
+  deadline), so the envelope is self-contained (model-a adjustment, R3).
 
-> **NOTA de identidades (v1.6.1):** `sigue`/RESUME opera sobre `session_id` +
-  `task_id` (continúa el contexto). `RETRY`/RECONCILE/TRANSFER operan sobre
-  `msg_id` (retransmiten o reconcilian el mensaje lógico). No mezclarlas:
-  enviar `sigue` no es retransmitir, y retransmitir sin contexto no reanuda.
+> **IDENTITY NOTE (v1.6.1):** `sigue`/RESUME operates on `session_id` +
+> `task_id` (continues the context). `RETRY`/RECONCILE/TRANSFER operate on
+> `msg_id` (retransmit or reconcile the logical message). Do not mix them:
+> sending `sigue` is not retransmitting, and retransmitting without context does not resume.
 
-### 12.2 Outbox durable (ANTES de enviar)
+### 12.2 Durable outbox (BEFORE sending)
 
-Antes de llamar a `prompt_async`, el **emisor** escribe una línea en
+Before calling `prompt_async`, the **sender** writes a line in
 `whiteboard/outbox.md` (append-only):
 
     [2026-08-11T15:42:03Z] OUTBOX | msg_id | dest=ses_X | run_id | token |
     lease=ses_A@UTC+3min|sucesor=ses_B | ESTADO=EN_VUELO
 
-El ACK (12.3) o el resultado pasan la línea a `ESTADO=CONFIRMADO`. Si expira
-sin confirmar: `ESTADO=EXPIRADO`. Si se transfiere el lease: `ESTADO=TRANSFERIDO`.
-**Solo el emisor actualiza el outbox** (conoce el estado del ACK/timeout);
-el receptor solo envía ACK y procesa, no escribe en el outbox (evita carreras
-por escritura concurrente, ajuste model-d R3). El líder lee el outbox, no
-adivina desde el chat. Sobrevive reinicios.
+The ACK (12.3) or the result moves the line to `ESTADO=CONFIRMADO`. If it expires
+without confirmation: `ESTADO=EXPIRADO`. If the lease is transferred: `ESTADO=TRANSFERIDO`.
+**Only the sender updates the outbox** (knows the ACK/timeout status);
+the receiver only sends ACK and processes, it does not write to the outbox (avoids
+write races, model-d R3 adjustment). The leader reads the outbox, does not
+guess from the chat. Survives restarts.
 
-> **POR QUÉ SOLO EL EMISOR (verificado por test T10, 2026-08-11):**
-> `Add-Content` de PowerShell es ATOMICO (todo-o-nada; nunca intercala ni
-> corrompe una línea) pero usa BLOQUEO EXCLUSIVO por llamada. Con dos
-> procesos escribiendo a la vez, el segundo recibe `IOException` ("archivo
-> en uso por otro proceso") y PIERDE su línea silenciosamente si no la
-> reintenta. En el test, W1 perdió las 25 líneas frente a W2 (0 corruptas).
-> Conclusión: la exclusividad del emisor no es una preferencia, es un
-> requisito de integridad. Si algún día se necesitara escritura concurrente
-> real, hacer append con reintento con backoff ante IOException (o usar un
-> archivo de lock).
+> **WHY ONLY THE SENDER (verified by test T10, 2026-08-11):**
+> PowerShell's `Add-Content` is ATOMIC (all-or-nothing; it never interleaves or
+> corrupts a line) but uses EXCLUSIVE LOCK per call. With two
+> processes writing simultaneously, the second receives `IOException` ("file
+> in use by another process") and LOSES its line silently if it does not
+> retry it. In the test, W1 lost 25 lines to W2 (0 corrupted).
+> Conclusion: sender exclusivity is not a preference, it is an
+> integrity requirement. If concurrent writes were ever needed
+> in the future, do append with retry with backoff on IOException (or use a
+> lock file).
 
-### 12.3 ACK en frontera de turno (requiere_ack=true)
+### 12.3 ACK at turn boundary (requiere_ack=true)
 
-Al despertar y procesar un mensaje con `requiere_ack=true`, el asesor responde
-PRIMERO con el formato completo de la sección 7.1:
-`ACK:<token_recibido>:<ID_AS_ASESOR>:<MODELO>`. El ACK significa "recibido y
-comenzando a procesar", no "terminé" (ajuste model-d R3). Es asíncrono y no
-bloqueante: el asesor continúa trabajando tras emitirlo.
+Upon waking up and processing a message with `requiere_ack=true`, the advisor first
+replies with the full format from section 7.1:
+`ACK:<received_token>:<ADVISOR_ID>:<MODEL>`. The ACK means "received and
+starting to process", not "finished" (model-d R3 adjustment). It is asynchronous and non-
+blocking: the advisor continues working after issuing it.
 
-Si el líder no recibe ACK en **120s** (ajuste model-d R3; 60s era insuficiente
-para tareas con investigación previa como leer noticias y escribir visión),
-**NO incrementa el plazo**: decide por DOS señales (12.4/12.9). Término
-preciso: es una **"ACK decision window" de 120s** (ventana de decisión), no un
-timeout: si la sesión crece, se espera otra ventana en lugar de declarar fallo.
+If the leader does not receive the ACK within **120s** (model-d R3 adjustment; 60s was insufficient
+for tasks with prior research like reading news and writing vision),
+**it does NOT increase the deadline**: it decides by TWO signals (12.4/12.9). Precise
+term: it is a **"ACK decision window" of 120s** (decision window), not a
+timeout: if the session grows, another window is waited for instead of declaring failure.
 
-1. ¿La sesión crece? (12.4a). Si el modelo está generando (p. ej. timeout
-   de proveedor con retry automático, caso 524 observado en 2026-08-11:
-   ACK válido a los 323s tras error [504]→retry): renovar lease y esperar
-   OTRO ciclo; el ACK llegará. Esto NO cuenta como fallo de escalada.
-2. ¿Sesión quieta Y sin ACK? → dormido/muerto → circuit breaker (12.9):
-   A transitorio → 1 retry idempotente; B recuperable → renovar lease;
-   C permanente → escalada (12.6) → DLQ (12.7).
+1. Is the session growing? (12.4a). If the model is generating (e.g. provider
+   timeout with automatic retry, case 524 observed on 2026-08-11:
+   valid ACK at 323s after [504]→retry error): renew lease and wait
+   ANOTHER cycle; the ACK will arrive. This does NOT count as an escalation failure.
+2. Session idle AND no ACK? → sleeping/dead → circuit breaker (12.9):
+   A transient → 1 idempotent retry; B recoverable → renew lease;
+   C permanent → escalation (12.6) → DLQ (12.7).
 
-Regla de finitud: nunca más de 2 ciclos de retry al mismo destino (12.9).
-La espera total queda acotada (plazo fijo x 2 ciclos); el ACK tardío por
-proveedor lento se tolera SOLO si la sesión crece. Un modelo que nunca
-contesta se detecta por sesión quieta, no por "timeout cada vez más largo".
+Finiteness rule: never more than 2 retry cycles to the same destination (12.9).
+Total wait is bounded (fixed deadline × 2 cycles); late ACK from a
+slow provider is tolerated ONLY if the session grows. A model that never
+replies is detected by idle session, not by "increasingly long timeout".
 
-### 12.4 Presencia pasiva (sustituye al heartbeat PING/PONG)
+### 12.4 Passive presence (replaces heartbeat PING/PONG)
 
-Sin mensajes PING/PONG (ruido; consenso R2). El líder comprueba presencia con
-dos lecturas de `GET /session/:id` separadas (6.1b) y/o mirando
-`whiteboard/outbox.md`: si un `EN_VUELO` expira y la sesión NO crece →
-dormido. Si crece → renovar lease y esperar.
+No PING/PONG messages (noise; R2 consensus). The leader checks presence with
+two separate `GET /session/:id` readings (6.1b) and/or by looking at
+`whiteboard/outbox.md`: if an `EN_VUELO` expires and the session is NOT growing →
+sleeping. If growing → renew lease and wait.
 
-### 12.5 Lease con sucesor (la tarea nunca queda sin dueño)
+### 12.5 Lease with successor (the task never goes without an owner)
 
-Cada tarea en el outbox lleva lease: dueño + deadline (UTC+3min) + sucesor.
-**Sucesor por defecto = siguiente en la secuencia de turnos**, no siempre el
-líder (ajuste model-d R3: distribuye la carga de handoffs; el líder sigue
-disponible como sucesor explícito si se designa). Reglas:
+Every task in the outbox carries a lease: owner + deadline (UTC+3min) + successor.
+**Default successor = next in the turn sequence**, not always the
+leader (model-d R3 adjustment: distributes handoff load; the leader remains
+available as explicit successor if designated). Rules:
 
-- (a) lease expirado y `EN_VUELO`: comprobar si la sesión crece (6.1b).
-  Si crece, renovar lease y esperar.
-- (b) Si está quieta: RETRY idempotente (retransmitir el MISMO `msg_id`,
-  no un `sigue`; ver distinción RESUME/RETRY en 6.1c y 12.1).
-- (c) Si tras el retry sigue `EN_VUELO`: REASIGNAR al sucesor con
-  `prompt_async`, mismo `msg_id` y nota "lease transferido". `max_saltos=2`.
-- (d) Agotado: QUARANTINE → DLQ con reporte humano.
+- (a) expired lease and `EN_VUELO`: check if the session grows (6.1b).
+  If growing, renew lease and wait.
+- (b) If idle: idempotent RETRY (retransmit the SAME `msg_id`,
+  not a `sigue`; see RESUME/RETRY distinction in 6.1c and 12.1).
+- (c) If still `EN_VUELO` after the retry: REASSIGN to successor with
+  `prompt_async`, same `msg_id` and note "lease transferred". `max_hops=2`.
+- (d) Exhausted: QUARANTINE → DLQ with human report.
 
-### 12.6 Canal de escalada (whiteboard/escalated.md)
+### 12.6 Escalation channel (whiteboard/escalated.md)
 
-Si `prompt_async` falla 3 veces, se escribe una entrada en
-`whiteboard/escalated.md` (unifica escalated + wake-on-write, consenso R2):
+If `prompt_async` fails 3 times, an entry is written to
+`whiteboard/escalated.md` (unifies escalated + wake-on-write, R2 consensus):
 
     URGENTE | para=<ses_ID> | msg_id | run_id | de=<ses_emisor> |
-    expira=UTC | "resumen"
+    expira=UTC | "summary"
 
-El asesor verifica `escalated.md` al despertar (tras cualquier `prompt_async`)
-y tras cada turno; si hay entrada para él, la procesa y marca `RECIBIDO`.
-NOTA: el archivo NO despierta por sí solo; es respaldo para cuando el agente
-ya está despierto por otro medio. "Magic packet" a nivel de aplicación
+The advisor checks `escalated.md` when waking up (after any `prompt_async`)
+and after each turn; if there is an entry for it, it processes it and marks `RECIBIDO`.
+NOTE: the file does NOT wake up on its own; it is backup for when the agent
+is already awake by other means. Application-level "magic packet"
 (Wake-on-LAN).
 
-> **Patrón de coordinación de CROSS: wake-on-write estigmergico (v1.6.1,
-> consenso asesores 2026-08-11).** Este mecanismo — archivo compartido como
-> canal de coordinación, con escritura como señal y mensajes `URGENTE|para=<ID>`
-> parseables que cada agente comprueba al despertar y tras cada turno — es el
-> **patrón de coordinación por estado compartido desarrollado para CROSS**. La
-> coordinación estigmergica (señales en un espacio compartido descubiertas por
-> otros agentes) existe en la literatura; CROSS la aplica de una forma
-> particular sobre archivos markdown con la semántica `URGENTE|para=<ID>`
-> descrita aquí. No se afirma equivalencia ni ausencia de equivalente en otros
-> protocolos (A2A, MCP, ACP/ANP): se documenta como patrón propio del proyecto,
-> con la analogía del "magic packet" de Wake-on-LAN (patente WO2007024306A1) —
-> binario, unidireccional y solo despierta, mientras que el nuestro es legible
-> por humanos, bidireccional (cualquier agente escribe y lee) y además de
-> despertar transporta el mensaje y su `msg_id` (idempotencia).
+> **CROSS coordination pattern: stigmergic wake-on-write (v1.6.1,
+> advisor consensus 2026-08-11).** This mechanism — shared file as
+> coordination channel, with writes as signals and `URGENTE|para=<ID>`
+> messages parseable by each agent when waking up and after each turn — is the
+> **state-shared coordination pattern developed for CROSS**. Stigmergic
+> coordination (signals in a shared space discovered by other agents) exists in the
+> literature; CROSS applies it in a particular way on markdown files with the
+> `URGENTE|para=<ID>` semantics described here. No equivalence is claimed nor
+> absence of equivalent in other protocols (A2A, MCP, ACP/ANP): it is documented
+> as the project's own pattern, with the Wake-on-LAN "magic packet" analogy
+> (patent WO2007024306A1) — binary, unidirectional, and only wakes up,
+> while ours is human-readable, bidirectional (any agent writes and reads) and
+> besides waking up it carries the message and its `msg_id` (idempotency).
 
-### 12.7 DLQ (whiteboard/dlq-mensajes.md)
+### 12.7 DLQ (whiteboard/dlq-messages.md)
 
-Tras agotar la escalada, el mensaje se escribe en `whiteboard/dlq-mensajes.md`
-(append-only, visible a todas las sesiones y al humano):
+After exhausting escalation, the message is written to `whiteboard/dlq-messages.md`
+(append-only, visible to all sessions and to the human):
 
-    [fecha] DLQ | msg_id | para=ses_X | de=ses_Y | reintentos=3 |
-    ESTADO=SIN RECOGER | flag=HUMAN_REVIEW | "resumen"
+    [date] DLQ | msg_id | para=ses_X | de=ses_Y | retries=3 |
+    ESTADO=UNREAD | flag=HUMAN_REVIEW | "summary"
 
-El campo `flag` es **cerrado** (parseable, v1.6.1 corrección external-reviewer F2):
-`HUMAN_REVIEW | NACK_ORIGINATED | QUARANTINE | PROVIDER_DOWN`. Facilita el
-filtrado para el humano; el `"resumen"` queda libre para el detalle.
+The `flag` field is **closed** (parseable, v1.6.1 external-reviewer F2 correction):
+`HUMAN_REVIEW | NACK_ORIGINATED | QUARANTINE | PROVIDER_DOWN`. It facilitates
+filtering for the human; the `"summary"` is free-form for details.
 
-El destinatario lo marca `RECIBIDO` al recogerlo. Nada se pierde
-silenciosamente.
+The recipient marks it `RECIBIDO` upon picking it up. Nothing is lost
+silently.
 
-### 12.8 Idempotencia (whiteboard/idempotencia-procesados.md)
+### 12.8 Idempotency (whiteboard/idempotencia-procesados.md)
 
-**Máquina de estados (v1.6.1, correcciones external-reviewer 2026-08-11 + F1-F4/O1):** cada
-`msg_id` pasa por los estados `CLAIMED` → `PROCESADO`. El estado `CLAIMED`
-cubre la ventana entre "comprobar que no existe" y "terminar de procesar" (que
-en un LLM dura 30-90 s), evitando la race condition de doble procesamiento:
+**State machine (v1.6.1, external-reviewer corrections 2026-08-11 + F1-F4/O1):** each
+`msg_id` goes through states `CLAIMED` → `PROCESADO`. The `CLAIMED` state
+covers the window between "check that it does not exist" and "finish processing" (which
+in an LLM lasts 30-90 s), avoiding the double-processing race condition:
 
     msg_id | timestamp_claim | modelo_claimer | CLAIMED_BY=ses_X
     msg_id | timestamp | modelo | PROCESADO
     msg_id | timestamp | modelo | SUPERSEDED_BY=ses_Y
 
-**Append-only (v1.6.1, O1 external-reviewer):** el fichero es un log append-only (como el
-outbox), NO editable in-place. La edición de una línea existente en PowerShell
-(`Get-Content` → modificar en memoria → `Set-Content`) NO es atómica y crea
-una race cuando dos agentes escriben a la vez (p. ej. el claimer legítimo
-escribiendo `PROCESADO` mientras el líder hace release). Por eso:
+**Append-only (v1.6.1, O1 external-reviewer):** the file is an append-only log (like the
+outbox), NOT editable in-place. Editing an existing line in PowerShell
+(`Get-Content` → modify in memory → `Set-Content`) is NOT atomic and creates
+a race when two agents write simultaneously (e.g. the legitimate claimer
+writing `PROCESADO` while the leader does release). Therefore:
 
-- **CLAIM**: antes de procesar, el receptor ANEXA
-  `msg_id | timestamp_claim | modelo_claimer | CLAIMED_BY=ses_X` (formato
-  EXACTO, sin espacios extra ni variaciones — el parser del CLI lo reconoce).
-  Si la última línea del `msg_id` ya es `CLAIMED` o `PROCESADO` vigente →
-  salta (duplicado).
-- **PROCESADO**: NO se reescribe la línea CLAIMED: al terminar, el receptor
-  ANEXA una línea nueva `msg_id | timestamp | modelo | PROCESADO`.
-- **Release (abortar)**: NO se elimina la línea: si el claimer aborta la
-  tarea, ANEXA `msg_id | timestamp | modelo | SUPERSEDED_BY=ses_Y` (el
-  reclamante original u otro agente declara que la reclamación queda sin
-  efecto; no escribe `PROCESADO`).
-- **Retry con CLAIMED (v1.6.1):** un RETRY solo se dispara si el `msg_id` NO
-  tiene línea alguna en el fichero, o si su última línea es `CLAIMED_BY=ses_X`
-  Y la sesión `ses_X` está quieta (12.4, doble lectura). Si `ses_X` crece →
-  esperar: el claimer sigue procesando. Esto replica el lease a nivel de
-  receptor.
-- El parser del CLI lee la **ÚLTIMA línea** de cada `msg_id` y esa determina
-  el estado vigente (`CLAIMED_BY=ses_X`, `PROCESADO` o `SUPERSEDED_BY=ses_Y`).
-  Las líneas anteriores son historial del ciclo de vida del `msg_id`.
+- **CLAIM**: before processing, the receiver APPENDS
+  `msg_id | timestamp_claim | modelo_claimer | CLAIMED_BY=ses_X` (EXACT
+  format, no extra spaces or variations — the CLI parser recognizes it).
+  If the last line for the `msg_id` is already `CLAIMED` or `PROCESADO` and active →
+  skip (duplicate).
+- **PROCESADO**: do NOT rewrite the CLAIMED line: when finished, the receiver
+  APPENDS a new line `msg_id | timestamp | modelo | PROCESADO`.
+- **Release (abort)**: do NOT delete the line: if the claimer aborts the
+  task, it APPENDS `msg_id | timestamp | modelo | SUPERSEDED_BY=ses_Y` (the
+  original claimant or another agent declares that the claim is void;
+  it does not write `PROCESADO`).
+- **Retry with CLAIMED (v1.6.1):** a RETRY is only triggered if the `msg_id` has NO
+  line at all in the file, or if its last line is `CLAIMED_BY=ses_X`
+  AND session `ses_X` is idle (12.4, double reading). If `ses_X` grows →
+  wait: the claimer is still processing. This replicates the lease at the
+  receiver level.
+- The CLI parser reads the **LAST line** of each `msg_id` and that determines
+  the active state (`CLAIMED_BY=ses_X`, `PROCESADO` or `SUPERSEDED_BY=ses_Y`).
+  Previous lines are the lifecycle history of the `msg_id`.
 
-Entrega **at-least-once con deduplicación por `msg_id`**: el envío puede
-repetirse (reintentos, retransmisiones), pero el receptor procesa cada `msg_id`
-una sola vez.
+**At-least-once delivery with `msg_id` deduplication:** the send may
+repeat (retries, retransmissions), but the receiver processes each `msg_id`
+only once.
 
-**Alcance del effectively-once (v1.6.1, corrección revisión externa):** la
-deduplicación por `msg_id` da comportamiento effectively-once SOLO para
-operaciones idempotentes (un segundo procesamiento no produce efecto distinto).
-Para operaciones NO idempotentes (p. ej. el receptor modifica un archivo y
-muere ANTES de anexar `PROCESADO`), la retransmisión procesaría dos veces:
-por tanto se requiere **RECONCILE (12.10)** — verificar el archivo de salida o
-el efecto antes de retransmitir — o confirmación del efecto. No se afirma
-effectively-once universal "por construcción" (eso solo sería garantizable con
-coordinación distribuida que aquí no existe).
+**Scope of effectively-once (v1.6.1, external review correction):**
+`msg_id` deduplication gives effectively-once behavior ONLY for
+idempotent operations (a second processing does not produce a different effect).
+For NON-idempotent operations (e.g. the receiver modifies a file and
+dies BEFORE appending `PROCESADO`), retransmission would process twice:
+therefore **RECONCILE (12.10)** is required — verify the output file or
+effect before retransmitting — or confirmation of the effect. Universal
+effectively-once is not claimed "by construction" (that would only be guaranteeable
+with distributed coordination which does not exist here).
 
-### 12.9 Circuit breaker A/B/C (max 2 intentos)
+### 12.9 Circuit breaker A/B/C (max 2 attempts)
 
-Antes de enviar "sigue", clasificar el fallo:
+Before sending "sigue", classify the failure:
 
-- A (transitorio): timeout/reintento puntual → RETRY idempotente (1 vez).
-- B (recuperable): sesión crece pero lenta → renovar lease, esperar.
-- C (permanente): no crece / error estable → REASIGNAR sucesor o QUARANTINE.
+- A (transient): one-off timeout/retry → idempotent RETRY (once).
+- B (recoverable): session growing but slow → renew lease, wait.
+- C (permanent): not growing / stable error → REASSIGN successor or QUARANTINE.
 
-Nunca más de 2 intentos ciegos al mismo destino.
+Never more than 2 blind attempts to the same destination.
 
-**Parámetros por defecto (implementados en `cross-delivery.psm1`,
+**Default parameters (implemented in `cross-delivery.psm1`,
 `cross.config.json`):**
 
-| Parámetro | Valor | Dónde |
+| Parameter | Value | Where |
 |---|---|---|
-| Intentos máximos (`MaxAttempts`) | 2 (`max_retries`) | config |
-| Timeout de espera de ACK | 120 s (`default_ack_timeout_s`) | config / `--ack-timeout` |
-| Backoff entre reintentos | 2 s lineales (`retry_backoff_s × intento`) | config |
-| Lease | 3 min (`default_lease_minutes`), renovado 1× por intento si el destino crece | config |
-| Verificación de "crece" | 15 s (`session_growing_check_ms`), 2 fingerprints de mensajes | config |
-| Polling de ACK | cada 3 s hasta deadline | motor |
-| HTTP reintentables | 0 (red/timeout), 408, 429, ≥500 | motor |
-| HTTP sin retry | 404 → `DEST_NOT_FOUND`/EXPIRADO; 401/403 → `AUTH_FAILED`/EXPIRADO | motor |
+| Max attempts (`MaxAttempts`) | 2 (`max_retries`) | config |
+| ACK wait timeout | 120 s (`default_ack_timeout_s`) | config / `--ack-timeout` |
+| Retry backoff | 2 s linear (`retry_backoff_s × attempt`) | config |
+| Lease | 3 min (`default_lease_minutes`), renewed 1× per attempt if destination grows | config |
+| "Growing" verification | 15 s (`session_growing_check_ms`), 2 message fingerprints | config |
+| ACK polling | every 3 s until deadline | engine |
+| Retriable HTTP | 0 (network/timeout), 408, 429, ≥500 | engine |
+| Non-retriable HTTP | 404 → `DEST_NOT_FOUND`/EXPIRADO; 401/403 → `AUTH_FAILED`/EXPIRADO | engine |
 
-**reason_code NACK (v1.7, corrección external-reviewer):** `NACK_TIMEOUT` (0/408/ACK_TIMEOUT),
+**NACK reason_code (v1.7, external-reviewer correction):** `NACK_TIMEOUT` (0/408/ACK_TIMEOUT),
 `NACK_RATE_LIMITED` (429), `NACK_DEST_NOT_FOUND` (404), `NACK_CONFIG_ERROR`
-(401/403), `NACK_SERVER_ERROR` (5xx agotado), `NACK_HTTP_4XX` (otro 4xx),
-`NACK_NETWORK` (default). La cuenta de `attempt` se **persiste en la línea del
-outbox** (`attempt=N`) antes de cada envío (corrección external-reviewer BUG L): tras un crash
-del proceso, `cross send` retoma desde el intento ya realizado.
+(401/403), `NACK_SERVER_ERROR` (5xx exhausted), `NACK_HTTP_4XX` (other 4xx),
+`NACK_NETWORK` (default). The `attempt` count is **persisted in the outbox
+line** (`attempt=N`) before each send (external-reviewer BUG L correction): after a process
+crash, `cross send` resumes from the attempt already made.
 
-Transiciones de estado del motor de entrega:
-`EN_VUELO → CONFIRMADO` (ACK o `--no-wait`/sin ACK requerido), `→ NACKED`
-(NACK con razón), `→ EXPIRADO` (404/401/403, HTTP no reintentable agotado, o
-sin ACK tras max intentos → `ACK_TIMEOUT`). El scan (12.10) gestiona los
-`EXPIRADO`/`EN_VUELO` vencidos con la escalera (12.11).
+Delivery engine state transitions:
+`EN_VUELO → CONFIRMADO` (ACK or `--no-wait`/no ACK required), `→ NACKED`
+(NACK with reason), `→ EXPIRADO` (404/401/403, non-retriable HTTP exhausted, or
+no ACK after max attempts → `ACK_TIMEOUT`). The scan (12.10) manages
+expired `EXPIRADO`/`EN_VUELO` with the ladder (12.11).
 
-### 12.10 Scan de recuperación (RETRY/RESUME/RECONCILE/QUARANTINE)
+### 12.10 Recovery scan (RETRY/RESUME/RECONCILE/QUARANTINE)
 
-El líder escanea el outbox al cerrar cada ronda Y automáticamente al detectar
-`EN_VUELO` expirado (el scan dispara el circuit breaker, no al revés; ajuste
-model-d R3). Clasifica cada mensaje expirado:
+The leader scans the outbox at the end of each round AND automatically when
+detecting expired `EN_VUELO` (the scan triggers the circuit breaker, not the other way
+around; model-d R3 adjustment). Classifies each expired message:
 
-- **RETRY**: solo si el paso es idempotente (msg_id), mismo prompt y token.
-- **RESUME**: si el agente dejó checkpoint parcial en whiteboard (continuar,
-  no repetir). **Cómo se ejecuta (v1.6.1):** RESUME no retransmite el mensaje
-  original ni reusa su `msg_id`; el líder envía `prompt_async` sobre la MISMA
-  `session_id` con una instrucción de continuación basada en el checkpoint
-  existente (p. ej. `"Continúa desde <archivo>:<línea>. Entrega el informe
-  final firmado"`). Quién determina el punto de continuación: el líder, leyendo
-  el checkpoint del whiteboard. Es la primitiva `sigue` de 6.1c.
-- **RECONCILE**: si el efecto pudo ocurrir pero falta el receipt: el líder
-  inspecciona la sesión y/o el **archivo de salida** (p. ej.
+- **RETRY**: only if the step is idempotent (msg_id), same prompt and token.
+- **RESUME**: if the agent left a partial checkpoint in whiteboard (continue,
+  do not repeat). **How it executes (v1.6.1):** RESUME does not retransmit the original
+  message nor reuse its `msg_id`; the leader sends `prompt_async` on the SAME
+  `session_id` with a continuation instruction based on the existing
+  checkpoint (e.g. `"Continue from <file>:<line>. Deliver the final signed
+  report"`). Who determines the continuation point: the leader, by reading
+  the whiteboard checkpoint. It is the `sigue` primitive from 6.1c.
+- **RECONCILE**: if the effect may have occurred but the receipt is missing: the leader
+  inspects the session and/or the **output file** (e.g.
   `diario/15_charla_conciencia.md`, `whiteboard/16_diario_conversaciones.md`)
-  ANTES de decidir;
-  si el trabajo está registrado allí, marcar CONFIRMADO sin reenviar (evita
-  duplicados, ajuste model-d R3).
-- **DIAGNÓSTICO POR LOG DEL SERVIDOR** (último recurso antes de QUARANTINE,
-  caso 524/2026-08-11): si la sesión está quieta Y no hay ACK tras los
-  reintentos, el líder lee el log del servidor (`%USERPROFILE%\.local\share\
-  opencode\log\opencode.log`, timestamps en UTC) buscando el `session.id`
-  del asesor en el intervalo del timeout. Clasifica el fallo:
-  - `stream error ... [504]/[524]` o `connect timeout` / `ENOTFOUND` /
-    `Rate limit exceeded` → **fallo del PROVEEDOR, agente sano**: el servidor
-    reintenta solo; NO escalar, renovar lease y esperar (el ACK suele llegar).
-  - `exiting loop` normal / sin error en el intervalo → **agente dormido o
-    muerto de verdad**: seguir la escalada normal (12.6 → DLQ).
-  - `stream error` distinto (auth, modelo inexistente) → error de
-    configuración: reportar al humano en DLQ.
-  Este paso evita falsos QUARANTINE por intermitencia del proveedor
-  (observado: ACK válido a los 323 s tras error 524 con retry automático).
-- **QUARANTINE**: si no se puede probar seguridad → DLQ con reporte humano.
+  BEFORE deciding;
+  if the work is recorded there, mark CONFIRMED without resending (avoids
+  duplicates, model-d R3 adjustment).
+- **SERVER LOG DIAGNOSIS** (last resort before QUARANTINE,
+  case 524/2026-08-11): if the session is idle AND there is no ACK after
+  retries, the leader reads the server log (`%USERPROFILE%\.local\share\
+  opencode\log\opencode.log`, timestamps in UTC) looking for the advisor's
+  `session.id` in the timeout interval. Classifies the failure:
+  - `stream error ... [504]/[524]` or `connect timeout` / `ENOTFOUND` /
+    `Rate limit exceeded` → **PROVIDER failure, healthy agent**: the server
+    retries on its own; do NOT escalate, renew lease and wait (the ACK usually arrives).
+  - normal `exiting loop` / no error in the interval → **agent truly
+    sleeping or dead**: follow normal escalation (12.6 → DLQ).
+  - different `stream error` (auth, nonexistent model) → configuration
+    error: report to human in DLQ.
+  This step prevents false QUARANTINE from provider intermittency
+  (observed: valid ACK at 323 s after 524 error with automatic retry).
+- **QUARANTINE**: if safety cannot be proven → DLQ with human report.
 
-NUNCA reenviar a ciegas un paso no idempotente que pudo haber mutado estado.
+NEVER blindly resend a non-idempotent step that may have mutated state.
 
-### 12.11 Escalera completa (orden de gestión)
+### 12.11 Complete ladder (management order)
 
-Sobre (12.1) → Outbox (12.2) → ACK (12.3) → Presencia pasiva (12.4) →
-Circuit breaker (12.9) → Lease+sucesor (12.5) → Scan (12.10, incluido
-diagnóstico por log del servidor) → Escalada (12.6) → DLQ (12.7).
-Idempotencia (12.8) transversal. La escalada y la DLQ son las últimas
-etapas del circuit breaker (C = permanente → escalada → DLQ).
+Envelope (12.1) → Outbox (12.2) → ACK (12.3) → Passive presence (12.4) →
+Circuit breaker (12.9) → Lease+successor (12.5) → Scan (12.10, including
+server log diagnosis) → Escalation (12.6) → DLQ (12.7).
+Idempotency (12.8) is cross-cutting. Escalation and DLQ are the last
+stages of the circuit breaker (C = permanent → escalation → DLQ).
 
-### 12.12 Archivos usados por v1.6 (todos en whiteboard/)
+### 12.12 Files used by v1.6 (all in whiteboard/)
 
-- `outbox.md`: registro de envíos ANTES de enviar (EN_VUELO/CONFIRMADO/
+- `outbox.md`: send log BEFORE sending (EN_VUELO/CONFIRMADO/
   EXPIRADO/TRANSFERIDO/NACKED).
-- `escalated.md`: canal de escalada `URGENTE|para=<ID>`.
-- `dlq-mensajes.md`: mensajes no entregados (SIN RECOGER/RECIBIDO, flag).
-- `idempotencia-procesados.md`: log append-only del ciclo de vida de cada
-  msg_id (CLAIMED → PROCESADO / SUPERSEDED_BY); dedupe por última línea.
+- `escalated.md`: escalation channel `URGENTE|para=<ID>`.
+- `dlq-messages.md`: undelivered messages (UNREAD/RECIBIDO, flag).
+- `idempotencia-procesados.md`: append-only lifecycle log for each
+  msg_id (CLAIMED → PROCESADO / SUPERSEDED_BY); dedupe by last line.
 
-### 12.13 Trade-offs aceptados (documentado tras revisión externa, 2026-08-11)
+### 12.13 Accepted trade-offs (documented after external review, 2026-08-11)
 
-- **SPOF del líder (aceptado):** el líder (sesión que coordina) es un punto
-  único de fallo: es quien escanea el outbox (12.10), ejecuta la escalera
-  (12.11) y decide QUARANTINE/DLQ. Si el líder se duerme o se cierra, los
-  mensajes `EN_VUELO` quedan sin gestionar hasta que otra sesión o el humano
-  los recupere. **No hay elección/reelección automática de líder en v1.6/v1.6.1.**
-  Mitigación en v1.6.1 (consenso asesores 2026-08-11, sin reelección):
-  **AVISO-SPOF (detección pasiva por asesores).** Cada asesor, al final de su
-  turno (y al despertar), escanea el outbox de forma ligera:
+- **Leader SPOF (accepted):** the leader (coordinating session) is a single
+  point of failure: it is the one that scans the outbox (12.10), runs the ladder
+  (12.11) and decides QUARANTINE/DLQ. If the leader goes to sleep or closes, the
+  `EN_VUELO` messages remain unmanaged until another session or the human
+  recovers them. **There is no automatic leader election/re-election in v1.6/v1.6.1.**
+  Mitigation in v1.6.1 (advisor consensus 2026-08-11, no re-election):
+  **AVISO-SPOF (passive detection by advisors).** Each advisor, at the end of its
+  turn (and when waking up), lightly scans the outbox:
   `Get-Content whiteboard/outbox.md | Where-Object { $_ -match "EN_VUELO" }`.
-  Si encuentra un `EN_VUELO` vencido (timestamp +3 min) cuyo `para=` coincide
-  con SU propio ID y su sesión está quieta (6.1b), escribe en
+  If it finds an expired `EN_VUELO` (timestamp +3 min) whose `para=` matches
+  ITS OWN ID and its session is idle (6.1b), it writes to
   `whiteboard/escalated.md`:
-  `AVISO-SPOF | msg_id=<ID> | para=<ses_ID> | de=<su_ID> | expira=UTC | "EN_VUELO vencido, sesion quieta"`.
-  Si el `EN_VUELO` ajeno NO es suyo, puede enviar al líder un mensaje (sin
-  `noReply`) "hay un mensaje caído" (visibilidad temprana, propuesta model-c),
-  o escribirlo en su propio chat (6.1e) si no puede enviar. Esto NO toma la
-  tarea ni reemplaza al líder: solo da visibilidad temprana y deja la gestión
-  al líder (o al humano vía `outbox.md`/`dlq-mensajes.md`). Añadir elección de
-  líder o heartbeats del líder sigue siendo mejora futura (Apéndice A).
-- **Entrega at-least-once (aceptado):** la deduplicación por `msg_id` evita
-  procesamiento duplicado, pero no garantiza "exactly-once" en el sentido
-  estricto de sistemas distribuidos (no hay transacción atómica entre el
-  efecto y su registro). El mecanismo proporciona **at-least-once con
-  deduplicación; effectively-once solo cuando la operación es idempotente o el
-  efecto se reconcilia antes de retransmitir** (12.8/12.10).
-- **Archivos = respaldo visible, no canal primario:** la única primitiva que
-  despierta a un agente dormido es `prompt_async` (12.1/5.1). Los archivos
-  (outbox, escalated, DLQ) son el registro durable y el canal de escalada,
-  no reemplazan el wakeup. Asumido desde v1.6.
+  `AVISO-SPOF | msg_id=<ID> | para=<ses_ID> | de=<its_ID> | expira=UTC | "EN_VUELO expired, session idle"`.
+  If the foreign `EN_VUELO` is NOT theirs, it can send the leader a message (without
+  `noReply`) "there is a fallen message" (early visibility, model-c proposal),
+  or write it in its own chat (6.1e) if it cannot send. This does NOT take over
+  the task or replace the leader: it only provides early visibility and leaves management
+  to the leader (or to the human via `outbox.md`/`dlq-messages.md`). Adding leader
+  election or leader heartbeats remains a future improvement (Appendix A).
+- **At-least-once delivery (accepted):** `msg_id` deduplication prevents
+  duplicate processing, but does not guarantee "exactly-once" in the strict
+  sense of distributed systems (there is no atomic transaction between the
+  effect and its record). The mechanism provides **at-least-once with
+  deduplication; effectively-once only when the operation is idempotent or the
+  effect is reconciled before retransmission** (12.8/12.10).
+- **Files = visible backup, not primary channel:** the only primitive that
+  wakes a sleeping agent is `prompt_async` (12.1/5.1). Files
+  (outbox, escalated, DLQ) are the durable record and escalation channel;
+  they do not replace the wakeup. Assumed since v1.6.
 
-### 12.14 Diagnóstico unificado (`cross poll/status/reconcile/aviso-spof`, Fase 4a)
+### 12.14 Unified diagnostics (`cross poll/status/reconcile/aviso-spof`, Phase 4a)
 
-Implementado en `cross/modules/cross-diagnostic.psm1` (2026-08-12). Los 4
-subcomandos SON LECTURA: no mutan outbox (solo `poll` puede marcar `NACKED` si
-detecta un NACK en `audit_log.md` no reflejado, y `aviso-spof --apply` anexa a
-`escalated.md`). Comandos:
+Implemented in `cross/modules/cross-diagnostic.psm1` (2026-08-12). The 4
+subcommands are READ-ONLY: they do not mutate the outbox (only `poll` can mark `NACKED` if
+it detects a NACK in `audit_log.md` not reflected, and `aviso-spof --apply` appends to
+`escalated.md`). Commands:
 
-- **`cross poll --msg msg_X [--timeout S] [--interval MS]`:** diagnostica un
-  mensaje del outbox usando la señal primaria `session.status` + heurística de
-  crecimiento (12.4/12.9). Bucle hasta deadline (por defecto
-  `default_ack_timeout_s`) o diagnóstico terminal. Tabla de decisión:
+- **`cross poll --msg msg_X [--timeout S] [--interval MS]`:** diagnoses an
+  outbox message using the primary signal `session.status` + growth
+  heuristics (12.4/12.9). Loop until deadline (default
+  `default_ack_timeout_s`) or terminal diagnosis. Decision table:
 
-  | outbox | sesión | diagnóstico | acción |
+  | outbox | session | diagnosis | action |
   |---|---|---|---|
-  | CONFIRMADO / audit ACK | — | `ACKED` | ninguna |
-  | NACKED / audit NACK | — | `NACKED` | gestionar por razón (7.5/12.10) |
-  | EXPIRADO/TRANSFERIDO/QUARANTINE | — | `TERMINAL` | escalera (12.10/12.11) |
-  | EN_VUELO | lease vencido | `EXPIRED` | scan (12.10) |
-  | EN_VUELO | `busy` + crece | `WORKING` | esperar (renovar lease 12.4a) |
-  | EN_VUELO | `busy` + quieta | `ACKED_QUIETA` | investigar audit/outbox |
-  | EN_VUELO | `idle` + quieta | `QUIETA_SIN_ACK` | circuit breaker 12.9 → escalar |
-  | EN_VUELO | `error` | `PROVIDER_DOWN` | renovar lease y esperar |
-  | EN_VUELO | no verificable | `UNKNOWN` | revisar puerto/servidor |
+  | CONFIRMADO / audit ACK | — | `ACKED` | none |
+  | NACKED / audit NACK | — | `NACKED` | manage by reason (7.5/12.10) |
+  | EXPIRADO/TRANSFERIDO/QUARANTINE | — | `TERMINAL` | ladder (12.10/12.11) |
+  | EN_VUELO | lease expired | `EXPIRED` | scan (12.10) |
+  | EN_VUELO | `busy` + growing | `WORKING` | wait (renew lease 12.4a) |
+  | EN_VUELO | `busy` + idle | `ACKED_QUIETA` | investigate audit/outbox |
+  | EN_VUELO | `idle` + idle | `QUIETA_SIN_ACK` | circuit breaker 12.9 → escalate |
+  | EN_VUELO | `error` | `PROVIDER_DOWN` | renew lease and wait |
+  | EN_VUELO | unverifiable | `UNKNOWN` | check port/server |
 
-- **`cross status [--msg|--run-id|--agent]`:** resumen del estado: outbox por
-  estado y por agente (con estado de sesión), `expired_unmanaged` (EN_VUELO con
-  lease vencido), idempotencia por estado, `claimed_orphaned` (CLAIMED_BY de
-  sesión quieta), `escalated_pending` (URGENTE sin RECIBIDO), `aviso_spof`,
-  `dlq_unread`/`by_flag`. Con `--msg`, añade `lifecycle` (outbox + idempotencia
-  + audit_log para ese msg_id).
+- **`cross status [--msg|--run-id|--agent]`:** status summary: outbox by
+  state and by agent (with session status), `expired_unmanaged` (EN_VUELO with
+  expired lease), idempotency by status, `claimed_orphaned` (CLAIMED_BY from
+  idle session), `escalated_pending` (URGENTE without RECIBIDO), `aviso_spof`,
+  `dlq_unread`/`by_flag`. With `--msg`, adds `lifecycle` (outbox + idempotency
+  + audit_log for that msg_id).
 - **`cross reconcile --msg msg_X --check-file PATH [--expected-token T]`:**
-  verifica si un entregable llegó al destino buscando su token en el archivo de
-  salida. Veredictos: `CONFIRMED` (token en check-file → `mark_confirmed`),
-  `AMBIGUOUS` (check existe pero sin token → `investigate`), `NOT_FOUND`
-  (check inexistente → `retry`). Implementa el paso RECONCILE de 12.10.
-- **`cross aviso-spof [--apply] [--for ses_X]`:** implementa la mitigación
-  SPOF de 12.13. Escanea los `EN_VUELO` vencidos: si `dest` es mi sesión y está
-  quieta, anexa `AVISO-SPOF` a `escalated.md` (solo con `--apply`); si es de
-  otra sesión, avisa al líder (sin `--apply` es dry-run, no escribe ni envía).
-   El aviso al líder va a `lider_session_id` de `cross.config.json` (fallback a
-   mi propia sesión si no está definido).
+  verifies whether a deliverable reached its destination by searching for its token in the
+  output file. Verdicts: `CONFIRMED` (token in check-file → `mark_confirmed`),
+  `AMBIGUOUS` (check exists but without token → `investigate`), `NOT_FOUND`
+  (check does not exist → `retry`). Implements the RECONCILE step from 12.10.
+- **`cross aviso-spof [--apply] [--for ses_X]`:** implements the
+  SPOF mitigation from 12.13. Scans expired `EN_VUELO` entries: if `dest` is my session and it is
+  idle, appends `AVISO-SPOF` to `escalated.md` (only with `--apply`); if it belongs to
+  another session, notifies the leader (without `--apply` it is a dry run, does not write or send).
+   The leader notice goes to `leader_session_id` from `cross.config.json` (fallback to
+   my own session if not defined).
 
-### 12.15 Acciones operativas (`cross ack/nack/resume/restart-task/nudge/escalate/dlq/quarantine/diagnose`, Fase 4b)
+### 12.15 Operational actions (`cross ack/nack/resume/restart-task/nudge/escalate/dlq/quarantine/diagnose`, Phase 4b)
 
-Implementado en `cross/modules/cross-action.psm1` (2026-08-13). Complementan la
-capa de LECTURA de 12.14 con las acciones que el líder ejecuta según 7.5 y
-12.10/12.11: SÍ mutan outbox, escalated, DLQ y audit. Comandos:
+Implemented in `cross/modules/cross-action.psm1` (2026-08-13). They complement the
+READ layer of 12.14 with the actions the leader executes per 7.5 and
+12.10/12.11: they DO mutate outbox, escalated, DLQ and audit. Commands:
 
-- **`cross ack --token T --for-msg-id X [--to ses_Y] [--model M]`:** emite
-  `ACK:<token>:<ID_SESION_EMISORA>[:<MODELO>]` (3-4 segmentos, 7.1) al destino y
-  registra `ACK|ENVIADO` en `audit_log.md`. `--to` por defecto = mi sesión.
+- **`cross ack --token T --for-msg-id X [--to ses_Y] [--model M]`:** emits
+  `ACK:<token>:<SENDER_ID>[:<MODEL>]` (3-4 segments, 7.1) to the destination and
+  logs `ACK|ENVIADO` in `audit_log.md`. `--to` defaults to my session.
 - **`cross nack --token T --for-msg-id X --reason R [--note] [--for-run-id R]
-  [--to] [--model]`:** emite `NACK:<token>:<id>[:modelo]:<razon>` (4-5 segmentos,
-  7.5) con razones cerradas. El formato enriquecido
-  (`NACK:...:<msg_id>:<run_id>`, 7 segmentos) SOLO viaja al wire cuando se pasa
-  `--for-run-id`: `msg_id` y `run_id` van juntos, y el parser distingue el
-  enriquecido (6 campos tras `NACK:`) del genérico. El audit guarda la razón.
-- **`cross resume --to ses_X --task-id TX [--from] [--text]`:** implementa el
-  RESUME de 12.10 (§6.1c). Envía `prompt_async` a la misma sesión con
-  instrucción de continuación; NO crea `msg_id` nuevo, NO toca el outbox, NO
-  incrementa `attempt` (§12.1).
-- **`cross restart-task --msg-id X [--to] [--text]`:** implementa el RETRY de
-  12.10 con el MISMO `msg_id` (idempotente): attempt+1 persistido en el outbox,
-  estado de vuelta a `EN_VUELO`. Errores: `OUTBOX_MSG_NOT_FOUND` /
-  `MAX_RETRIES_EXCEEDED` (máx `max_retries` de `cross.config.json`).
-- **`cross nudge --to ses_X --task "..." [--token]`:** prompt firme que ignora
-  `Continue`/orientaciones previas (antídoto al descarrilamiento por
-  auto-continuación, 6.1c).
+  [--to] [--model]`:** emits `NACK:<token>:<id>[:model]:<reason>` (4-5 segments,
+  7.5) with closed reasons. The enriched format
+  (`NACK:...:<msg_id>:<run_id>`, 7 segments) ONLY travels on the wire when
+  `--for-run-id` is passed: `msg_id` and `run_id` go together, and the parser distinguishes
+  the enriched (6 fields after `NACK:`) from the generic. The audit stores the reason.
+- **`cross resume --to ses_X --task-id TX [--from] [--text]`:** implements the
+  RESUME from 12.10 (§6.1c). Sends `prompt_async` to the same session with
+  continuation instruction; does NOT create new `msg_id`, does NOT touch the outbox, does NOT
+  increment `attempt` (§12.1).
+- **`cross restart-task --msg-id X [--to] [--text]`:** implements the RETRY from
+  12.10 with the SAME `msg_id` (idempotent): attempt+1 persisted in the outbox,
+  status reset to `EN_VUELO`. Errors: `OUTBOX_MSG_NOT_FOUND` /
+  `MAX_RETRIES_EXCEEDED` (max `max_retries` from `cross.config.json`).
+- **`cross nudge --to ses_X --task "..." [--token]`:** firm prompt that ignores
+  `Continue`/prior guidance (antidote to derailment by
+  auto-continuation, 6.1c).
 - **`cross escalate --msg-id X --to ses_Y --reason "..." [--run-id] [--apply]`:**
-  anexa la línea `URGENTE` canónica a `escalated.md` (12.6). Sin `--apply` NO
-  notifica (dry-run); con `--apply` envía wake-on-write al destino.
+  appends the canonical `URGENTE` line to `escalated.md` (12.6). Without `--apply` does NOT
+  notify (dry run); with `--apply` sends wake-on-write to the destination.
 - **`cross dlq --msg-id X [--to] [--retries] [--flag F] [--summary]`:**
-  anexa la línea DLQ a `dlq-mensajes.md` (12.7) con flags cerrados
-  `HUMAN_REVIEW|NACK_ORIGINATED|QUARANTINE|PROVIDER_DOWN` y marca el outbox
+  appends the DLQ line to `dlq-messages.md` (12.7) with closed flags
+  `HUMAN_REVIEW|NACK_ORIGINATED|QUARANTINE|PROVIDER_DOWN` and marks the outbox
   `ESTADO=DLQ`.
 - **`cross quarantine --msg-id X --reason "..." [--check-log] [--minutes N]`:**
-  DLQ con `flag=HUMAN_REVIEW` + outbox `ESTADO=QUARANTINE`. Con `--check-log`
-  diagnostica por `opencode.log` (ver `diagnose`) y anexa `log=<clasificación>`
-  al resumen del DLQ.
-- **`cross diagnose --msg X [--outbox-file] [--minutes N]`:** clasifica el
-  destino del msg leyendo `opencode.log` (config `log_path`) en la ventana de N
-  minutos (10 por defecto), filtrando por el `dest` del outbox. Clasificaciones:
+  DLQ with `flag=HUMAN_REVIEW` + outbox `ESTADO=QUARANTINE`. With `--check-log`
+  diagnoses via `opencode.log` (see `diagnose`) and appends `log=<classification>`
+  to the DLQ summary.
+- **`cross diagnose --msg X [--outbox-file] [--minutes N]`:** classifies the
+  message destination by reading `opencode.log` (config `log_path`) in a window of N
+  minutes (10 by default), filtering by the outbox `dest`. Classifications:
   `PROVIDER_DOWN` (`[504]`/`[524]`/`stream error 504|524`/`connect timeout`/
   `ENOTFOUND`/`Rate limit exceeded`), `AGENT_SLEEPING` (`exiting loop`),
-  `CONFIG_ERROR` (otro `stream error`), `NO_ERROR`, `NO_DATA`. La ventana y el
-  timestamp se comparan en UTC (la `Z` del log es obligatoria).
+  `CONFIG_ERROR` (other `stream error`), `NO_ERROR`, `NO_DATA`. The window and
+  timestamps are compared in UTC (the `Z` in the log is mandatory).
 
-Reglas de escritura: todos estos subcomandos son **append-only** sobre sus
-archivos (audit, escalated, DLQ, outbox); no reescriben líneas previas.
+Write rules: all these subcommands are **append-only** on their
+files (audit, escalated, DLQ, outbox); they do not rewrite previous lines.
 
-## Apéndice A: Mejoras futuras
+## Appendix A: Future improvements
 
-> **Consenso (Rondas de mejora 2026-08-10):** se documentan como futuro; NO
-> prometer funcionalidad que el servidor no soporta aún.
+> **Consensus (Improvement Rounds 2026-08-10):** documented as future work; do NOT
+> promise functionality the server does not support yet.
 >
-> **Backlog priorizado v1.7 (consenso asesores 2026-08-11):**
-> | Prioridad | Riesgo | Propuesta | Nota |
+> **Prioritized backlog v1.7 (advisor consensus 2026-08-11):**
+> | Priority | Risk | Proposal | Note |
 > |---|---|---|---|
-> | ALTA | BAJO | **SQLite (`cross.db`)** | Resuelve la race condition de `Add-Content` (CROSS_WINDOWS.md #6). Nota revisión externa: es mejora arquitectónica, no reparación urgente (la regla de escritor único ya elimina T10 del protocolo). Decidir por crecimiento real. |
-> | ALTA | BAJO | **`session.status`/idle/error** | Ya existe `GET /session/:id`; usarla como señal primaria de presencia y conservar la heurística de crecimiento como fallback (revisión externa). |
-> | MEDIA | MEDIO-ALTO | **SSE / long-polling** | Solo si el backend lo soporta; si no, NO implementar. Probar experimentalmente antes: `GET /event`, crear actividad, observar `session.status`/`message.updated`/`session.idle`/`session.error` (revisión externa). |
-> | BAJA | BAJO | **SDK `@opencode-ai/sdk`** | Mejora DX; `curl`+ASCII actual funciona. Verificar semántica antes. |
-> | BAJA/MEDIA | ALTO | **`session.abort`** | Solo opt-in / soft-abort primero. Abortar a ciegas puede dejar estados inconsistentes. |
+> | HIGH | LOW | **SQLite (`cross.db`)** | Resolves the `Add-Content` race condition (CROSS_WINDOWS.md #6). External review note: it is an architectural improvement, not an urgent fix (the single-writer rule already eliminates T10 from the protocol). Decide based on actual growth. |
+> | HIGH | LOW | **`session.status`/idle/error** | `GET /session/:id` already exists; use it as the primary presence signal and keep growth heuristics as fallback (external review). |
+> | MEDIUM | MEDIUM-HIGH | **SSE / long-polling** | Only if the backend supports it; if not, do NOT implement. Test experimentally first: `GET /event`, create activity, observe `session.status`/`message.updated`/`session.idle`/`session.error` (external review). |
+> | LOW | LOW | **`@opencode-ai/sdk` SDK** | DX improvement; `curl`+ASCII works now. Verify semantics first. |
+> | LOW/MEDIUM | HIGH | **`session.abort`** | Opt-in / soft-abort only first. Blind aborting may leave inconsistent states. |
 
-- **Long-polling / SSE:** si la API de OpenCode Desktop llega a soportarlos,
-  sustituir el polling activo (sección 6) por estos mecanismos para reducir
-  carga y latencia. Fuera de alcance en v1.1 (requiere soporte de backend).
-- **Operaciones en lote (batch):** enviar/leer varias sesiones en una llamada.
-- **Heartbeat centralizado:** revisitar `heartbeat.json` solo si `GET /session/:id`
-  no cubre presencia, con un mecanismo de escritura con bloqueo.
-- **Wrapper con modo `--aviso-atasco` (propuesto por model-d, v1.3):** que
-  `send_message.ps1` cuente los reintentos fallidos y, tras 3 fallos, envíe
-  automáticamente `ESTANCADO-Rx:<ID>:<MODELO>` a la sesión del líder y aborte,
-  en lugar de dejar al agente intentando comandos a ciegas (ver 11.6).
-- **Elección de líder / eliminar SPOF (recomendado por revisión externa,
-  2026-08-11):** mecanismo para que otra sesión asuma la coordinación si el
-  líder no escanea el outbox (12.10) o no responde, p. ej. detección de
-  outbox con `EN_VUELO` vencido y ausencia de gestión reciente del líder.
-  Aceptado como trade-off en v1.6 (12.13).
+- **Long-polling / SSE:** if the OpenCode Desktop API ever supports them,
+  replace active polling (section 6) with these mechanisms to reduce
+  load and latency. Out of scope for v1.1 (requires backend support).
+- **Batch operations:** send/read multiple sessions in a single call.
+- **Centralized heartbeat:** revisit `heartbeat.json` only if `GET /session/:id`
+  does not cover presence, with a write mechanism using locking.
+- **Wrapper with `--aviso-atasco` mode (proposed by model-d, v1.3):** have
+  `send_message.ps1` count failed retries and, after 3 failures, automatically
+  send `ESTANCADO-Rx:<ID>:<MODEL>` to the leader's session and abort,
+  instead of leaving the agent trying commands blindly (see 11.6).
+- **Leader election / eliminate SPOF (recommended by external review,
+  2026-08-11):** mechanism for another session to assume coordination if the
+  leader does not scan the outbox (12.10) or does not respond, e.g. detection of
+  outbox with expired `EN_VUELO` and absence of recent leader management.
+  Accepted as a trade-off in v1.6 (12.13).

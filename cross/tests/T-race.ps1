@@ -1,8 +1,8 @@
-# T-race.ps1 - Test de concurrencia del wrapper send_message.ps1 (Fase 5).
-# 4 jobs paralelos x 20 llamadas al wrapper cada uno = 80 envios concurrentes.
-# Verifica que outbox.md, delivery_log.jsonl y audit_log.md queden coherentes
-# (80 msg_id unicos, sin lineas corruptas, sin OUTBOX_LOCKED perdidos).
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-race.ps1
+# T-race.ps1 - Concurrency test for the send_message.ps1 wrapper (Phase 5).
+# 4 parallel jobs x 20 wrapper calls each = 80 concurrent sends.
+# Verifies that outbox.md, delivery_log.jsonl and audit_log.md remain consistent
+# (80 unique msg_ids, no corrupt lines, no lost OUTBOX_LOCKED).
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-race.ps1
 $ErrorActionPreference = 'Stop'
 $wrapper = Join-Path $PSScriptRoot '..\send_message.ps1'
 
@@ -35,7 +35,7 @@ for ($j = 0; $j -lt $Jobs; $j++) {
         $localFail = 0
         for ($i = 0; $i -lt $PerJob; $i++) {
             $dest = "ses_zzz_no_existe_race_${JobN}_$i"
-            $texto = "T-race job $JobN msj $i"
+            $texto = "T-race job $JobN msg $i"
             $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Wrapper -Destino $dest -Texto $texto -NoReply 2>&1 | Out-String
             if ($out -match 'OUTBOX_LOCKED') { $localFail++ }
         }
@@ -45,7 +45,7 @@ for ($j = 0; $j -lt $Jobs; $j++) {
 
 $timeout = (Get-Date).AddMinutes(10)
 while (@($jobResults | Where-Object { $_.State -eq 'Running' }).Count -gt 0) {
-    if ((Get-Date) -gt $timeout) { Write-Host 'TIMEOUT esperando a los jobs'; $jobResults | Remove-Job -Force; exit 1 }
+    if ((Get-Date) -gt $timeout) { Write-Host 'TIMEOUT waiting for jobs'; $jobResults | Remove-Job -Force; exit 1 }
     Start-Sleep -Milliseconds 500
 }
 
@@ -56,31 +56,31 @@ foreach ($jr in $jobResults) {
     Remove-Job $jr -Force
 }
 Write-Host "== T-race: 4 jobs x 20 wrapper send =="
-Assert-True ($outboxFail -eq 0) "ningun OUTBOX_LOCKED en los $Expected envios" "outboxFail=$outboxFail"
+Assert-True ($outboxFail -eq 0) "no OUTBOX_LOCKED in the $Expected sends" "outboxFail=$outboxFail"
 
 $msgIds = @(Get-Content -LiteralPath $outbox | Where-Object { $_ -match '^\S.*OUTBOX \| msg_' })
-Assert-True ($msgIds.Count -eq $Expected) "outbox con $Expected lineas OUTBOX" "count=$($msgIds.Count)"
+Assert-True ($msgIds.Count -eq $Expected) "outbox with $Expected OUTBOX lines" "count=$($msgIds.Count)"
 $uniq = @($msgIds | ForEach-Object { if ($_ -match 'OUTBOX \| (\S+) \|') { $Matches[1] } } | Sort-Object -Unique)
-Assert-True ($uniq.Count -eq $Expected) "todos los msg_id unicos" "uniq=$($uniq.Count)"
+Assert-True ($uniq.Count -eq $Expected) "all msg_ids unique" "uniq=$($uniq.Count)"
 $corrupt = @($msgIds | Where-Object { $_ -notmatch '^\S+\] OUTBOX \| msg_\S+ \| dest=ses_[^\s|]+ \| run_id=\S+ \| token=\S+ \| lease=[^\s|]+ \|' })
-Assert-True ($corrupt.Count -eq 0) "ninguna linea OUTBOX corrupta" "corrupt=$($corrupt.Count)"
+Assert-True ($corrupt.Count -eq 0) "no corrupt OUTBOX lines" "corrupt=$($corrupt.Count)"
 $noEstado = @($msgIds | Where-Object { $_ -notmatch 'ESTADO=\S+' })
-Assert-True ($noEstado.Count -eq 0) "todas las lineas con ESTADO" "noEstado=$($noEstado.Count)"
+Assert-True ($noEstado.Count -eq 0) "all lines have ESTADO" "noEstado=$($noEstado.Count)"
 
 $dlLines = @(Get-Content -LiteralPath $deliveryLog | Where-Object { $_.Trim() })
-Assert-True ($dlLines.Count -eq $Expected) "delivery_log con $Expected lineas" "count=$($dlLines.Count)"
+Assert-True ($dlLines.Count -eq $Expected) "delivery_log with $Expected lines" "count=$($dlLines.Count)"
 $badJson = 0
 $dlIds = New-Object System.Collections.ArrayList
 foreach ($l in $dlLines) {
     try { $o = $l | ConvertFrom-Json; [void]$dlIds.Add([string]$o.msg_id) } catch { $badJson++ }
 }
-Assert-True ($badJson -eq 0) "delivery_log: todas las lineas JSON validas" "badJson=$badJson"
-Assert-True (@($dlIds | Sort-Object -Unique).Count -eq $Expected) "delivery_log: msg_id unicos" "uniq=$(@($dlIds | Sort-Object -Unique).Count)"
+Assert-True ($badJson -eq 0) "delivery_log: all lines valid JSON" "badJson=$badJson"
+Assert-True (@($dlIds | Sort-Object -Unique).Count -eq $Expected) "delivery_log: unique msg_ids" "uniq=$(@($dlIds | Sort-Object -Unique).Count)"
 
 $auditCount = @(Get-Content -LiteralPath $auditLog | Where-Object { $_ -match 'ENV|RESTART|OUTBOX' }).Count
-Assert-True ($auditCount -ge $Expected) "audit_log con al menos $Expected entradas ENV" "count=$auditCount"
+Assert-True ($auditCount -ge $Expected) "audit_log with at least $Expected ENV entries" "count=$auditCount"
 
 Remove-Item -LiteralPath $script:WhiteDir -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

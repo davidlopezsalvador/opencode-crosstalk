@@ -1,5 +1,5 @@
-# Tests de cross aviso-spof (Fase 4a): deteccion de EN_VUELO vencidos y aviso.
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-aviso-spof.ps1
+# Cross aviso-spof tests (Phase 4a): detecting expired EN_VUELO and alerting.
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-aviso-spof.ps1
 $ErrorActionPreference = 'Stop'
 $mod = Join-Path $PSScriptRoot '..\modules\cross-diagnostic.psm1'
 Import-Module $mod -Force
@@ -39,56 +39,56 @@ function Run-Aviso {
         -SessionFn { param($id) Fake-Session } -NotifyFn $script:NotifyFn -SleepFn { param($ms) No-Sleep }
 }
 
-Write-Host "== T-aviso-spof: dry-run por defecto =="
+Write-Host "== T-aviso-spof: dry-run by default =="
 New-Fixture
 $script:SessState = @{ session_id = 'ses_me'; status = 'idle'; growing = $false; checkable = $true; wait_ms = 0 }
 $script:NotifyFn = { param($dest, $mid) $script:NotifyCalls++; return $null }
 $script:NotifyCalls = 0
 $r = Run-Aviso
-Assert-True ($r.ok -and $r.dry_run) 'dry_run por defecto' $r.dry_run
-Assert-True ($r.vencidos -eq 2) 'cuenta los vencidos' $r.vencidos
+Assert-True ($r.ok -and $r.dry_run) 'dry_run by default' $r.dry_run
+Assert-True ($r.vencidos -eq 2) 'counts expired' $r.vencidos
 $res = @($r.results)
-Assert-True ($res.Count -eq 2) 'resultados para los 2 vencidos' $res.Count
+Assert-True ($res.Count -eq 2) 'results for the 2 expired' $res.Count
 $mine = @($res | Where-Object { $_.msg_id -eq 'msg_spof1' })
 $other = @($res | Where-Object { $_.msg_id -eq 'msg_spof2' })
-Assert-True ($mine[0].action -eq 'aviso-spof') 'vencido de mi sesion quieta -> aviso-spof' $mine[0].action
-Assert-True ($other[0].action -eq 'notify-lider') 'vencido de otra sesion -> notify-lider' $other[0].action
-Assert-True (@($r.written).Count -eq 0 -and @($r.notified).Count -eq 0) 'dry-run no escribe ni notifica' ''
-Assert-True ($script:NotifyCalls -eq 0) 'NotifyFn no llamado en dry-run' $script:NotifyCalls
+Assert-True ($mine[0].action -eq 'aviso-spof') 'expired from my idle session -> aviso-spof' $mine[0].action
+Assert-True ($other[0].action -eq 'notify-leader') 'expired from other session -> notify-leader' $other[0].action
+Assert-True (@($r.written).Count -eq 0 -and @($r.notified).Count -eq 0) 'dry-run writes and notifies nothing' ''
+Assert-True ($script:NotifyCalls -eq 0) 'NotifyFn not called in dry-run' $script:NotifyCalls
 
-Write-Host "== T-aviso-spof: --apply escribe AVISO-SPOF y notifica =="
+Write-Host "== T-aviso-spof: --apply writes AVISO-SPOF and notifies =="
 New-Fixture
 $script:SessState = @{ session_id = 'ses_me'; status = 'idle'; growing = $false; checkable = $true; wait_ms = 0 }
 $script:NotifyFn = { param($dest, $mid) $script:NotifyCalls++; return $null }
 $script:NotifyCalls = 0
 $r = Run-Aviso -Apply
-Assert-True (-not $r.dry_run) 'con --apply deja de ser dry-run' $r.dry_run
-Assert-True (@($r.written).Count -eq 1 -and $r.written -contains 'msg_spof1') 'escribe solo el de mi sesion quieta' ($r.written -join ',')
-Assert-True (@($r.notified).Count -eq 1 -and $r.notified -contains 'msg_spof2') 'notifica solo el de la otra sesion' ($r.notified -join ',')
-Assert-True ($script:NotifyCalls -eq 1) 'NotifyFn llamado una vez' $script:NotifyCalls
+Assert-True (-not $r.dry_run) 'with --apply no longer dry-run' $r.dry_run
+Assert-True (@($r.written).Count -eq 1 -and $r.written -contains 'msg_spof1') 'writes only the one from my idle session' ($r.written -join ',')
+Assert-True (@($r.notified).Count -eq 1 -and $r.notified -contains 'msg_spof2') 'notifies only the one from the other session' ($r.notified -join ',')
+Assert-True ($script:NotifyCalls -eq 1) 'NotifyFn called once' $script:NotifyCalls
 $esc = Get-Content -LiteralPath $script:EscalatedFile -Raw
-Assert-True ($esc -match 'AVISO-SPOF.*msg_spof1') 'AVISO-SPOF anexado a escalated.md' $esc
+Assert-True ($esc -match 'AVISO-SPOF.*msg_spof1') 'AVISO-SPOF appended to escalated.md' $esc
 
-Write-Host "== T-aviso-spof: mi sesion creciendo no avisa =="
+Write-Host "== T-aviso-spof: my growing session does not alert =="
 New-Fixture
 $script:SessState = @{ session_id = 'ses_me'; status = 'busy'; growing = $true; checkable = $true; wait_ms = 0 }
 $script:NotifyFn = { param($dest, $mid) $script:NotifyCalls++; return $null }
 $script:NotifyCalls = 0
 $r = Run-Aviso -Apply
 $mine = @($r.results | Where-Object { $_.msg_id -eq 'msg_spof1' })
-Assert-True ($mine[0].action -eq 'creciendo') 'mi sesion crece -> esperar, no aviso' $mine[0].action
-Assert-True (@($r.written).Count -eq 0) 'no escribe aviso si mi sesion crece' ($r.written -join ',')
-Assert-True (@($r.notified).Count -eq 1) 'aun asi avisa de la otra sesion' ($r.notified -join ',')
+Assert-True ($mine[0].action -eq 'creciendo') 'my session is growing -> wait, no alert' $mine[0].action
+Assert-True (@($r.written).Count -eq 0) 'does not write alert if my session is growing' ($r.written -join ',')
+Assert-True (@($r.notified).Count -eq 1) 'still alerts about the other session' ($r.notified -join ',')
 
-Write-Host "== T-aviso-spof: BUG Q - config expone lider_session_id =="
+Write-Host "== T-aviso-spof: BUG Q - config exposes leader_session_id =="
 $cfg = Get-CrossConfig
-Assert-True ([bool]$cfg.lider_session_id) 'lider_session_id definido en config' $cfg.lider_session_id
-Assert-True ($cfg.lider_session_id -eq $cfg.my_session_id) 'lider = mi sesion (soy el lider)' $cfg.lider_session_id
+Assert-True ([bool]$cfg.leader_session_id) 'leader_session_id defined in config' $cfg.leader_session_id
+Assert-True ($cfg.leader_session_id -eq $cfg.my_session_id) 'leader = my session (I am the leader)' $cfg.leader_session_id
 $avisoResult = Get-CrossAvisoSpof -OutboxPath $script:OutboxFile -EscalatedPath $script:EscalatedFile `
     -MySessionId '' -Apply -Port 0 -Password '' -WaitMs 0 `
     -SessionFn { param($id) Fake-Session } -NotifyFn { param($d,$m) $null } -SleepFn { param($ms) No-Sleep }
-Assert-True ($avisoResult.ok) 'BUG Q: funcion resuelve sesion destino sin MySessionId (usa config)' $avisoResult.dry_run
+Assert-True ($avisoResult.ok) 'BUG Q: function resolves target session without MySessionId (uses config)' $avisoResult.dry_run
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

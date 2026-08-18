@@ -1,8 +1,8 @@
-# Tests de mutaciones directas del outbox (cross-state): Get-OutboxEntry,
+# Tests for direct outbox mutations (cross-state): Get-OutboxEntry,
 # Set-OutboxEstado, Renew-CrossLease, Set-OutboxAttempt, Update-OutboxLine.
-# Complementa a T-delivery (que las ejerce via el motor) con casos directos
-# de frontera: OUTBOX_MSG_NOT_FOUND, outbox inexistente, attempt insertado.
-# Uso: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-outbox-mut.ps1
+# Complements T-delivery (which exercises via the engine) with direct edge
+# cases: OUTBOX_MSG_NOT_FOUND, non-existent outbox, attempt insertion.
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-outbox-mut.ps1
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-state.psm1') -Force
 
@@ -27,62 +27,62 @@ $base = @"
 [2026-08-12T00:00:00Z] OUTBOX | msg_m2 | dest=ses_A | run_id=R2 | token=T2 | lease=ses_A@2026-08-12T00:03:00Z | ESTADO=EN_VUELO
 "@
 
-Write-Host "== T-outbox: Get-OutboxEntry devuelve la entrada parseada =="
+Write-Host "== T-outbox: Get-OutboxEntry returns parsed entry =="
 New-Fixture $base
 $e = Get-OutboxEntry -MsgId 'msg_m1' -Path $script:OutboxFile
-Assert-True ($null -ne $e -and $e.msg_id -eq 'msg_m1') 'entry encontrado' ($null -ne $e)
-Assert-True ($e.dest -eq 'ses_A' -and $e.token -eq 'T1' -and $e.estado -eq 'EN_VUELO') 'campos parseados' "$($e.dest)|$($e.token)|$($e.estado)"
+Assert-True ($null -ne $e -and $e.msg_id -eq 'msg_m1') 'entry found' ($null -ne $e)
+Assert-True ($e.dest -eq 'ses_A' -and $e.token -eq 'T1' -and $e.estado -eq 'EN_VUELO') 'parsed fields' "$($e.dest)|$($e.token)|$($e.estado)"
 
-Write-Host "== T-outbox: Set-OutboxEstado muta solo la linea correcta =="
+Write-Host "== T-outbox: Set-OutboxEstado mutates only the correct line =="
 $r = Set-OutboxEstado -MsgId 'msg_m1' -Estado 'CONFIRMADO' -Path $script:OutboxFile
 Assert-True ($r.ok) 'Set-OutboxEstado ok' ($r | ConvertTo-Json -Compress)
 $e = Get-OutboxEntry -MsgId 'msg_m1' -Path $script:OutboxFile
 $e2 = Get-OutboxEntry -MsgId 'msg_m2' -Path $script:OutboxFile
 Assert-True ($e.estado -eq 'CONFIRMADO') 'msg_m1 -> CONFIRMADO' $e.estado
-Assert-True ($e2.estado -eq 'EN_VUELO') 'msg_m2 intacto' $e2.estado
+Assert-True ($e2.estado -eq 'EN_VUELO') 'msg_m2 untouched' $e2.estado
 
-Write-Host "== T-outbox: Renew-CrossLease renueva deadline conservando owner =="
+Write-Host "== T-outbox: Renew-CrossLease renews deadline preserving owner =="
 $r = Renew-CrossLease -MsgId 'msg_m1' -Path $script:OutboxFile -Minutes 5
 Assert-True ($r.ok) 'Renew ok' ($r | ConvertTo-Json -Compress)
 $e = Get-OutboxEntry -MsgId 'msg_m1' -Path $script:OutboxFile
 $now = (Get-Date).ToUniversalTime()
-Assert-True ($e.lease -match '^ses_A@(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)$') 'lease con owner ses_A + deadline UTC' $e.lease
+Assert-True ($e.lease -match '^ses_A@(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)$') 'lease with owner ses_A + UTC deadline' $e.lease
 if ($e.lease -match '@(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)') {
     $deadline = [System.DateTime]::Parse($Matches[1]).ToUniversalTime()
     $diff = ($deadline - $now).TotalMinutes
     Assert-True ($diff -ge 4.9 -and $diff -le 5.1) 'deadline ~ +5 min' $diff
 }
-Assert-True ($e.estado -eq 'CONFIRMADO') 'estado conservado tras renew' $e.estado
+Assert-True ($e.estado -eq 'CONFIRMADO') 'state preserved after renew' $e.estado
 
-Write-Host "== T-outbox: Set-OutboxAttempt sobre linea SIN attempt inserta antes de ESTADO =="
+Write-Host "== T-outbox: Set-OutboxAttempt on line WITHOUT attempt inserts before ESTADO =="
 $r = Set-OutboxAttempt -MsgId 'msg_m2' -Attempt 2 -Path $script:OutboxFile
 Assert-True ($r.ok) 'Set-OutboxAttempt ok' ($r | ConvertTo-Json -Compress)
 $e = Get-OutboxEntry -MsgId 'msg_m2' -Path $script:OutboxFile
-Assert-True ($e.attempt -eq 2) 'attempt=2 en msg_m2' $e.attempt
-Assert-True ($e.estado -eq 'EN_VUELO') 'ESTADO conservado tras insertar attempt' $e.estado
+Assert-True ($e.attempt -eq 2) 'attempt=2 on msg_m2' $e.attempt
+Assert-True ($e.estado -eq 'EN_VUELO') 'ESTADO preserved after inserting attempt' $e.estado
 
-Write-Host "== T-outbox: Set-OutboxAttempt sobre linea CON attempt lo reemplaza =="
+Write-Host "== T-outbox: Set-OutboxAttempt on line WITH attempt replaces it =="
 New-Fixture $base
 $r = Set-OutboxAttempt -MsgId 'msg_m1' -Attempt 3 -Path $script:OutboxFile
 $e = Get-OutboxEntry -MsgId 'msg_m1' -Path $script:OutboxFile
 Assert-True ($e.attempt -eq 3) 'attempt 1 -> 3' $e.attempt
 
-Write-Host "== T-outbox: msg inexistente -> OUTBOX_MSG_NOT_FOUND =="
+Write-Host "== T-outbox: non-existent msg -> OUTBOX_MSG_NOT_FOUND =="
 New-Fixture $base
 $r = Set-OutboxEstado -MsgId 'no_existe' -Estado 'CONFIRMADO' -Path $script:OutboxFile
-Assert-True (-not $r.ok -and $r.err -eq 'OUTBOX_MSG_NOT_FOUND') 'Set estado msg inexistente' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'OUTBOX_MSG_NOT_FOUND') 'Set state non-existent msg' $r.err
 $r = Renew-CrossLease -MsgId 'no_existe' -Path $script:OutboxFile
-Assert-True (-not $r.ok -and $r.err -eq 'OUTBOX_MSG_NOT_FOUND') 'Renew msg inexistente' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'OUTBOX_MSG_NOT_FOUND') 'Renew non-existent msg' $r.err
 
-Write-Host "== T-outbox: archivo inexistente -> OUTBOX_NOT_FOUND / null =="
+Write-Host "== T-outbox: non-existent file -> OUTBOX_NOT_FOUND / null =="
 New-Fixture $base
 $missing = Join-Path (Split-Path $script:OutboxFile) 'no_existe.md'
 $e = Get-OutboxEntry -MsgId 'msg_m1' -Path $missing
-Assert-True ($null -eq $e) 'GetOutboxEntry archivo inexistente -> null' ($null -ne $e)
+Assert-True ($null -eq $e) 'GetOutboxEntry non-existent file -> null' ($null -ne $e)
 $r = Update-OutboxLine -MsgId 'msg_m1' -NewContent 'x' -Path $missing
-Assert-True (-not $r.ok -and $r.err -eq 'OUTBOX_NOT_FOUND') 'Update archivo inexistente' $r.err
+Assert-True (-not $r.ok -and $r.err -eq 'OUTBOX_NOT_FOUND') 'Update non-existent file' $r.err
 
-Write-Host "== T-outbox: BUG B - Update-OutboxLine con delimitadores (msg_m1 no toca msg_m12) =="
+Write-Host "== T-outbox: BUG B - Update-OutboxLine with delimiters (msg_m1 does not touch msg_m12) =="
 $base2 = @"
 # OUTBOX
 ## Activo
@@ -94,8 +94,8 @@ $r = Set-OutboxEstado -MsgId 'msg_m1' -Estado 'CONFIRMADO' -Path $script:OutboxF
 $e = Get-OutboxEntry -MsgId 'msg_m1' -Path $script:OutboxFile
 $e12 = Get-OutboxEntry -MsgId 'msg_m12' -Path $script:OutboxFile
 Assert-True ($e.estado -eq 'CONFIRMADO') 'msg_m1 -> CONFIRMADO' $e.estado
-Assert-True ($e12.estado -eq 'EN_VUELO') 'msg_m12 NO tocado (BUG B)' $e12.estado
+Assert-True ($e12.estado -eq 'EN_VUELO') 'msg_m12 NOT touched (BUG B)' $e12.estado
 
 Write-Host ""
-Write-Host ("RESULTADO: {0} pass, {1} fail" -f $pass, $fail)
+Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }
