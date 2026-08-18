@@ -1,4 +1,4 @@
-# CROSS_WINDOWS — Pitfalls of PowerShell 5.1 / Windows
+# OpenCode Cross-Talk — Pitfalls of PowerShell 5.1 / Windows
 
 Environment-specific pitfalls (Windows + PowerShell 5.1), consolidated on
 2026-08-11 after an external review (separated from `CROSS_TALK.md` on 2026-08-11

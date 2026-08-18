@@ -1,4 +1,4 @@
-# CHANGELOG — CROSS_TALK (protocol history)
+# CHANGELOG — OpenCode Cross-Talk (protocol history)
 
 Version history, discoveries, and pitfalls of the Cross-Talk protocol.
 The **current rules** are in `CROSS_TALK.md`; this file is history only.

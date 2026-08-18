@@ -10,13 +10,14 @@ function Get-StateTimestamp {
 
 function Get-IdempotenciaPath {
     $cfg = Get-CrossConfig
-    $dir = if ($cfg.whiteboard_dir) { [Environment]::ExpandEnvironmentVariables([string]$cfg.whiteboard_dir) } else { '' }
+    $dir = if ($cfg.whiteboard_dir) { [Environment]::ExpandEnvironmentVariables([string]$cfg.whiteboard_dir) } else { Join-Path $PSScriptRoot '..\whiteboard' }
     return Join-Path $dir 'idempotencia-procesados.md'
 }
 
 function Get-OutboxPath {
     $cfg = Get-CrossConfig
-    $dir = if ($cfg.whiteboard_dir) { [Environment]::ExpandEnvironmentVariables([string]$cfg.whiteboard_dir) } else { '' }
+    $root = Join-Path $PSScriptRoot '..'
+    $dir = if ($cfg.whiteboard_dir) { [Environment]::ExpandEnvironmentVariables([string]$cfg.whiteboard_dir) } else { Join-Path $root 'whiteboard' }
     return Join-Path $dir 'outbox.md'
 }
 
@@ -72,7 +73,9 @@ function Add-IdempotenciaLine {
     $dir = Split-Path -Parent $Path
     if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     if (-not (Test-Path -LiteralPath $Path)) {
-        [System.IO.File]::WriteAllText($Path, '', (New-Object System.Text.UTF8Encoding($false)))
+        $parent = Split-Path -Parent $Path
+        if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+        [System.IO.File]::WriteAllText($Path, "# IDEMPOTENCIA`n## Activo (formato v1.6)`n", (New-Object System.Text.UTF8Encoding($false)))
     }
     [System.IO.File]::AppendAllText($Path, $line + "`n", (New-Object System.Text.UTF8Encoding($false)))
     return $line
@@ -469,10 +472,7 @@ function Add-OutboxEntry {
                 if ($j -eq $idx) { [void]$newContent.Add($line) }
             }
             [System.IO.File]::WriteAllLines($Path, @($newContent), (New-Object System.Text.UTF8Encoding($false)))
-            $after = Get-Content -LiteralPath $Path -Raw
-            if ($after -match [regex]::Escape($line)) {
-                return @{ ok = $true; msg_id = $MsgId; line = $line }
-            }
+            return @{ ok = $true; msg_id = $MsgId }
         } catch [System.IO.IOException] {
             # archivo en uso por otro proceso: reintentar con backoff
         } catch [System.Threading.AbandonedMutexException] {

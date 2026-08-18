@@ -1,4 +1,4 @@
-# Cross-Talk between OpenCode Desktop sessions
+# OpenCode Cross-Talk between OpenCode Desktop sessions
 
 Reference document so that any agent in this project can communicate
 with other open chats/sessions in the same project.
@@ -80,20 +80,19 @@ curl.exe -s -m 8 -u "opencode:$password" "http://127.0.0.1:$port/global/health"
 
 If `health` does not respond, the app has restarted: repeat the detection from scratch.
 
-## 2. List project sessions
+## 3. Session Discovery and Team Selection
 
-```powershell
-curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session" | ConvertFrom-Json
-```
+Before initiating any task, the Leader must perform a discovery phase to identify potential collaborators:
 
-Each session includes `id`, `title`, `directory`, `agent`, `model` and `time`.
-Filter by `directory` to keep only those for this project:
+1. **Discovery**: The Leader calls `cross sessions --directory <project_dir>` to identify all active sessions in the current project.
+2. **Presentation**: The Leader presents the list of found sessions to the human user, specifying the model and title of each session.
+3. **Selection**: The Leader asks the user to:
+   - Select specific sessions by ID or name.
+   - Request the use of ALL available sessions.
+   - Exclude specific sessions.
+4. **Confirmation**: The Leader only proceeds to Step 4 (Messaging) once the user has confirmed the final list of Advisors.
 
-```powershell
-$sessions = curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session" | ConvertFrom-Json
-$sessions | Where-Object { $_.directory -eq "YOUR_PROJECT_DIR" } |
-    Select-Object id, title, agent
-```
+This phase prevents the Leader from accidentally waking up unrelated sessions or overloading a single agent.
 
 ## 3. Read messages from a session
 

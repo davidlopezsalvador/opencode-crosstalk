@@ -156,7 +156,7 @@ function Get-PollDiagnostic {
         return @{ diagnostic = 'EXPIRED'; action = 'ejecutar scan (12.10) para RETRY/RESUME/RECONCILE'; confidence = 'alta' }
     }
     if ($null -eq $SessionState -or -not $SessionState.checkable) {
-        return @{ diagnostic = 'UNKNOWN'; action = 'no se pudo verificar la sesion destino'; confidence = 'baja' }
+        return @{ diagnostic = 'UNKNOWN'; action = 'could not verify destination session'; confidence = 'low' }
     }
     $st = $SessionState.status
     $grow = [bool]$SessionState.growing

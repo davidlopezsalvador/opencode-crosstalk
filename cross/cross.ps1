@@ -424,41 +424,77 @@ switch ($Command) {
     'send' {
         $watch = [System.Diagnostics.Stopwatch]::StartNew()
         $msg = [string]$flags['msg']
+        $text = if ($flags['text']) { [string]$flags['text'] } else { '' }
+        
         if (-not $msg) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --msg msg_id' } -Cmd 'send'
-            Out-Result $r 'send' -Watch $watch
+            if (-not $text) {
+                $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --msg msg_id or --text' } -Cmd 'send'
+                Out-Result $r 'send' -Watch $watch
+                return
+            }
+            # Fast Send: Auto-generate ID and add to outbox if --msg is missing but --text is present
+            $ts = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
+            $rand = -join ((48..57 + 65..90 + 97..122) | Get-Random -Count 6 | ForEach-Object { [char]$_ })
+            $msg = "msg_cli_$ts-$rand"
+            
+            $dest = if ($flags['dest']) { [string]$flags['dest'] } else { '' }
+            if (-not $dest) {
+                $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --dest for fast send' } -Cmd 'send'
+                Out-Result $r 'send' -Watch $watch
+                return
+            }
+            
+            $token = if ($flags['token']) { [string]$flags['token'] } else { '' }
+            $runId = if ($flags['run-id']) { [string]$flags['run-id'] } else { '' }
+            $lease = if ($flags['lease']) { [string]$flags['lease'] } else { '' }
+            $sucesor = if ($flags['sucesor']) { [string]$flags['sucesor'] } else { '' }
+            
+            $outboxFile = [string]$flags['outbox-file']
+            $addRes = Add-OutboxEntry -MsgId $msg -Dest $dest -RunId $runId -Token $token -Lease $lease -Sucesor $sucesor -Path $outboxFile
+            if (-not $addRes.ok) {
+                $r = New-Result -Ok $false -Code 2 -Data @{ err = $addRes.err; detail = $addRes.detail } -Cmd 'send'
+                Out-Result $r 'send' -Watch $watch
+                return
+            }
+        } else {
+            $outboxFile = [string]$flags['outbox-file']
+            $entry = Get-OutboxEntry -MsgId $msg -Path $outboxFile
+            if (-not $entry) {
+                $r = New-Result -Ok $false -Code 64 -Data @{ err = 'OUTBOX_MSG_NOT_FOUND'; detail = "no outbox entry found for $msg" } -Cmd 'send'
+                Out-Result $r 'send' -Watch $watch
+                return
+            }
+            if ($entry.estado -eq 'CONFIRMADO') {
+                $r = New-Result -Ok $true -Code 0 -Data @{ msg_id = $msg; outbox_state = 'CONFIRMADO'; already = $true; detail = 'already delivered' } -Cmd 'send'
+                Out-Result $r 'send' -Watch $watch
+                return
+            }
+            if ($entry.estado -ne 'EN_VUELO') {
+                $r = New-Result -Ok $false -Code 2 -Data @{ err = 'ESTADO_INVALIDO'; detail = "outbox=$($entry.estado) (expected EN_VUELO)"; msg_id = $msg; outbox_state = $entry.estado } -Cmd 'send'
+                Out-Result $r 'send' -Watch $watch
+                return
+            }
+            $dest = if ($flags['dest']) { [string]$flags['dest'] } else { [string]$entry.dest }
+            $token = if ($flags['token']) { [string]$flags['token'] } else { [string]$entry.token }
+            $runId = if ($flags['run-id']) { [string]$flags['run-id'] } else { [string]$entry.run_id }
+            $lease = if ($flags['lease']) { [string]$flags['lease'] } else { [string]$entry.lease }
+            $sucesor = if ($flags['sucesor']) { [string]$flags['sucesor'] } else { [string]$entry.sucesor }
         }
-        $outboxFile = [string]$flags['outbox-file']
-        $entry = Get-OutboxEntry -MsgId $msg -Path $outboxFile
-        if (-not $entry) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'OUTBOX_MSG_NOT_FOUND'; detail = "no outbox entry found for $msg" } -Cmd 'send'
-            Out-Result $r 'send' -Watch $watch
-        }
-        if ($entry.estado -eq 'CONFIRMADO') {
-            $r = New-Result -Ok $true -Code 0 -Data @{ msg_id = $msg; outbox_state = 'CONFIRMADO'; already = $true; detail = 'already delivered' } -Cmd 'send'
+
+        if (-not $dest) {
+            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --dest ses_Y' } -Cmd 'send'
             Out-Result $r 'send' -Watch $watch
             return
         }
-        if ($entry.estado -ne 'EN_VUELO') {
-            $r = New-Result -Ok $false -Code 2 -Data @{ err = 'ESTADO_INVALIDO'; detail = "outbox=$($entry.estado) (expected EN_VUELO)"; msg_id = $msg; outbox_state = $entry.estado } -Cmd 'send'
-            Out-Result $r 'send' -Watch $watch
-        }
-        $dest = if ($flags['dest']) { [string]$flags['dest'] } else { [string]$entry.dest }
-        if (-not $dest) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --dest ses_Y (neither in flag nor in outbox)' } -Cmd 'send'
-            Out-Result $r 'send' -Watch $watch
-        }
-        $text = if ($flags['text']) { [string]$flags['text'] } else { '' }
         if (-not $text) {
             $r = New-Result -Ok $false -Code 64 -Data @{ err = 'USAGE_ERROR'; detail = 'missing --text (message body)' } -Cmd 'send'
             Out-Result $r 'send' -Watch $watch
+            return
         }
-        $token = if ($flags['token']) { [string]$flags['token'] } else { [string]$entry.token }
-        $runId = if ($flags['run-id']) { [string]$flags['run-id'] } else { [string]$entry.run_id }
-        $lease = if ($flags['lease']) { [string]$flags['lease'] } else { [string]$entry.lease }
-        $sucesor = if ($flags['sucesor']) { [string]$flags['sucesor'] } else { [string]$entry.sucesor }
         $reqAck = $true
-        if ($entry.requiere_ack -and $entry.requiere_ack.ToLower() -eq 'false') { $reqAck = $false }
+        $outboxFile = [string]$flags['outbox-file']
+        $entry = Get-OutboxEntry -MsgId $msg -Path $outboxFile
+        if ($entry -and $entry.requiere_ack -and $entry.requiere_ack.ToLower() -eq 'false') { $reqAck = $false }
         if ($flags['ack-timeout'] -and [int]$flags['ack-timeout'] -eq 0) { $reqAck = $false }
         if ($flags['timeout'] -and [int]$flags['timeout'] -eq 0) { $reqAck = $false }
         $ackTimeout = 0
@@ -466,7 +502,7 @@ switch ($Command) {
         elseif ($flags['timeout']) { $ackTimeout = [int]$flags['timeout'] }
         else { $ackTimeout = [int]$config.default_ack_timeout_s }
         $maxAttempts = if ($flags['max-attempts']) { [int]$flags['max-attempts'] } else { [int]$config.max_retries }
-        $attempt = if ($flags['attempt']) { [int]$flags['attempt'] } else { [int]$entry.attempt }
+        $attempt = if ($flags['attempt']) { [int]$flags['attempt'] } else { if ($entry) { [int]$entry.attempt } else { 0 } }
         $backoffSec = if ($config.retry_backoff_s) { [int]$config.retry_backoff_s } else { 2 }
         $sweep = Invoke-CrossAutoSweep -Path $outboxFile -ExcludeMsgId $msg -LeaseMinutes $config.default_lease_minutes
         $res = New-CrossDelivery -MsgId $msg -Dest $dest -Text $text -RunId $runId -Token $token -Lease $lease -Sucesor $sucesor -RequiereAck:$reqAck -OutboxPath $outboxFile -AckTimeoutSec $ackTimeout -MaxAttempts $maxAttempts -InitialAttempt $attempt -BackoffSec $backoffSec -NoWait:([bool]$flags['no-wait']) -Port $PortArg -Password $PasswordArg -NoCache:$NoCache -HealthSkip:$HealthSkip

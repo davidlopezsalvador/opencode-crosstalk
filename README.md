@@ -1,8 +1,7 @@
-# CROSS-TALK
+# OpenCode Cross-Talk
 
-Multi-agent communication protocol for [OpenCode Desktop](https://opencode.ai). Lets AI agent sessions in the same project talk to each other via the local HTTP API — with durable outbox, ACK/NACK handshakes, idempotent delivery, and automatic diagnostics.
+[User Guide for Non-Coders](USER_GUIDE.md) | [Protocol spec](CROSS_TALK.md) | [Changelog](CHANGELOG.md) | [Windows pitfalls](CROSS_WINDOWS.md)
 
-**Version: 1.6.1** | [Protocol spec](CROSS_TALK.md) | [Changelog](CHANGELOG.md) | [Windows pitfalls](CROSS_WINDOWS.md)
 
 ## What it does
 
@@ -81,7 +80,6 @@ cross-talk/
 └── cross/
     ├── cross.ps1              # CLI entry point (20+ subcommands)
     ├── cross.config.json      # Runtime configuration
-    ├── send_message.ps1       # Legacy wrapper (delegates to cross send)
     ├── lib/
     │   └── cross-format.psm1  # Formatting utilities
     ├── modules/
