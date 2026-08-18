@@ -1,0 +1,18 @@
+{
+    "my_session_id": "",
+    "lider_session_id": "",
+    "my_model": "",
+    "my_role": "lider",
+    "whiteboard_dir": "./whiteboard",
+    "log_path": "%USERPROFILE%\\.local\\share\\opencode\\log\\opencode.log",
+    "desktop_logs_dir": "%APPDATA%\\ai.opencode.desktop\\logs",
+    "default_ack_timeout_s": 120,
+    "default_lease_minutes": 3,
+    "max_retries": 2,
+    "retry_backoff_s": 2,
+    "max_saltos": 2,
+    "session_growing_check_ms": 15000,
+    "protocol_version": "1.6.1",
+    "port_cache_ttl_s": 60,
+    "port_scan_range": [30000, 40000]
+}

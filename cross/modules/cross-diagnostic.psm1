@@ -1,0 +1,608 @@
+# cross-diagnostic.psm1 - Fase 4a (diagnostico): poll, status, reconcile, aviso-spof.
+# Observacion pura salvo las mutaciones explicitas (B1: poll marca NACKED; aviso-spof con --apply).
+# Uso (via cross.ps1): cross poll|status|reconcile|aviso-spof
+Set-StrictMode -Version 2.0
+
+if (-not (Get-Command ConvertTo-AsciiSafe -ErrorAction SilentlyContinue)) {
+    Import-Module (Join-Path $PSScriptRoot '..\lib\cross-format.psm1') -Force -DisableNameChecking
+}
+if (-not (Get-Command Get-CrossConfig -ErrorAction SilentlyContinue)) {
+    Import-Module (Join-Path $PSScriptRoot 'cross-transport.psm1') -Force -DisableNameChecking
+}
+if (-not (Get-Command Read-OutboxLog -ErrorAction SilentlyContinue)) {
+    Import-Module (Join-Path $PSScriptRoot 'cross-state.psm1') -Force -DisableNameChecking
+}
+if (-not (Get-Command Test-SessionGrowing -ErrorAction SilentlyContinue)) {
+    Import-Module (Join-Path $PSScriptRoot 'cross-delivery.psm1') -Force -DisableNameChecking
+}
+
+function Get-DiagPaths {
+    $cfg = Get-CrossConfig
+    $dir = if ($cfg.whiteboard_dir) { [Environment]::ExpandEnvironmentVariables([string]$cfg.whiteboard_dir) } else { Split-Path -Parent (Get-OutboxPath) }
+    return @{
+        outbox       = Join-Path $dir 'outbox.md'
+        idempotencia = Join-Path $dir 'idempotencia-procesados.md'
+        audit        = Join-Path $dir 'audit_log.md'
+        escalated    = Join-Path $dir 'escalated.md'
+        dlq          = Join-Path $dir 'dlq-mensajes.md'
+    }
+}
+
+function Get-SessionState {
+    param(
+        [Parameter(Mandatory=$true)][string]$SessionId,
+        [int]$Port = 0,
+        [string]$Password = '',
+        [int]$WaitMs = 15000,
+        [scriptblock]$SessionFn,
+        [scriptblock]$SleepFn
+    )
+    if ($SessionFn) { return @(& $SessionFn $SessionId) }
+    $status = ''
+    $checkable = $false
+    $growing = $false
+    if ($Port) {
+        $api = Invoke-CrossApi -Method 'GET' -Path "/session/$SessionId" -Port $Port -Password $Password -TimeoutSec 8
+        if ($api.status -eq 200) {
+            $s = $api.body | ConvertFrom-Json
+            if ($null -ne $s -and $s.status) { $status = [string]$s.status }
+            $checkable = $true
+        }
+        if ($status -eq 'busy' -or -not $status) {
+            $g = Test-SessionGrowing -SessionId $SessionId -Port $Port -Password $Password -WaitMs $WaitMs -SleepFn $SleepFn
+            $growing = [bool]$g.growing
+        }
+    }
+    return @{ session_id = $SessionId; status = $status; growing = $growing; checkable = $checkable; wait_ms = $WaitMs }
+}
+
+function Read-EscalatedLog {
+    param([string]$Path = '')
+    if (-not $Path) { $Path = (Get-DiagPaths).escalated }
+    $items = New-Object System.Collections.ArrayList
+    if (-not (Test-Path -LiteralPath $Path)) { return @($items) }
+    foreach ($line in (Get-Content -LiteralPath $Path)) {
+        $t = $line.Trim()
+        if (-not $t) { continue }
+        if ($t -notmatch '^URGENTE\s*\||^AVISO-SPOF') { continue }
+        $recibido = ($t -match '\bRECIBIDO\s*$')
+        $fields = @($t -split '\|') | ForEach-Object { $_.Trim() }
+        $para = ''; $msgId = ''; $runId = ''; $de = ''; $expira = ''; $resumen = ''
+        foreach ($f in $fields) {
+            if ($f -match '^para=(.+)$') { $para = $Matches[1] }
+            elseif ($f -match '^run_id=(.+)$') { $runId = $Matches[1] }
+            elseif ($f -match '^de=(.+)$') { $de = $Matches[1] }
+            elseif ($f -match '^expira=(.+)$') { $expira = $Matches[1] }
+            elseif ($f -match '^msg_id=(.+)$') { $msgId = $Matches[1] }
+            elseif (-not $msgId -and $f -match '^msg_[^\s|]+$') { $msgId = $f }
+            elseif ($f -match "^(?:'|\"")(.+?)(?:'|\"")(?:\s*RECIBIDO)?$") { $resumen = $Matches[1] }
+        }
+        [void]$items.Add([ordered]@{
+            raw = $t; kind = $(if ($t -match '^AVISO-SPOF') { 'AVISO-SPOF' } else { 'URGENTE' })
+            para = $para; msg_id = $msgId; run_id = $runId; de = $de; expira = $expira; resumen = $resumen; recibido = $recibido
+        })
+    }
+    return @($items)
+}
+
+function Read-DlqLog {
+    param([string]$Path = '')
+    if (-not $Path) { $Path = (Get-DiagPaths).dlq }
+    $items = New-Object System.Collections.ArrayList
+    if (-not (Test-Path -LiteralPath $Path)) { return @($items) }
+    foreach ($line in (Get-Content -LiteralPath $Path)) {
+        $t = $line.Trim()
+        if (-not $t -or $t -notmatch '^\[.*\]\s*DLQ') { continue }
+        $fields = @($t -split '\|') | ForEach-Object { $_.Trim() }
+        if ($fields.Count -lt 5) { continue }
+        $msgId = $fields[1]
+        $para = ''; $de = ''; $reintentos = ''; $estado = ''; $flag = ''; $resumen = ''
+        foreach ($f in $fields) {
+            if ($f -match '^para=(.+)$') { $para = $Matches[1] }
+            elseif ($f -match '^de=(.+)$') { $de = $Matches[1] }
+            elseif ($f -match '^reintentos=(\d+)') { $reintentos = $Matches[1] }
+            elseif ($f -match '^ESTADO=(.+)$') { $estado = $Matches[1] }
+            elseif ($f -match '^flag=(.+)$') { $flag = $Matches[1] }
+            elseif ($f -match "^(?:'|\"")(.+?)(?:'|\"")$") { $resumen = $Matches[1] }
+        }
+        [void]$items.Add([ordered]@{
+            raw = $t; msg_id = $msgId; para = $para; de = $de; reintentos = $reintentos
+            estado = $estado; flag = $flag; resumen = $resumen; unread = ($estado -eq 'SIN RECOGER')
+        })
+    }
+    return @($items)
+}
+
+function Find-AuditOutcome {
+    param([Parameter(Mandatory=$true)][string]$MsgId, [string]$AuditPath = '')
+    if (-not $AuditPath) { $AuditPath = (Get-DiagPaths).audit }
+    $ack = $null; $nack = $null
+    if (-not (Test-Path -LiteralPath $AuditPath)) { return @{ ack = $null; nack = $null } }
+    $pat = 'msg=' + [regex]::Escape($MsgId) + '(\s|;|\||$)'
+    foreach ($line in (Get-Content -LiteralPath $AuditPath)) {
+        if ($line -notmatch $pat) { continue }
+        $fields = @($line -split '\|')
+        if ($fields.Count -lt 7) { continue }
+        $estado = $fields[6].Trim()
+        if ($estado -eq 'NACKED') {
+            $rc = ''; $nota = if ($fields.Count -gt 7) { $fields[7].Trim() } else { '' }
+            if ($nota -match 'rc=(\S+)') { $rc = $Matches[1] }
+            $nack = @{ estado = 'NACKED'; reason = $rc }
+        } elseif ($estado -eq 'CONFIRMADO') {
+            $ack = @{ estado = 'CONFIRMADO' }
+        }
+    }
+    return @{ ack = $ack; nack = $nack }
+}
+
+function Get-PollDiagnostic {
+    param(
+        [string]$OutboxEstado,
+        [bool]$NackDetected = $false,
+        [bool]$AckDetected = $false,
+        [bool]$LeaseVencido = $false,
+        $SessionState = $null
+    )
+    if ($OutboxEstado -eq 'CONFIRMADO' -or $AckDetected) {
+        return @{ diagnostic = 'ACKED'; action = 'ninguna (entregado y confirmado)'; confidence = 'alta' }
+    }
+    if ($OutboxEstado -eq 'NACKED' -or $NackDetected) {
+        return @{ diagnostic = 'NACKED'; action = 'gestionar segun razon (12.7/12.10)'; confidence = 'alta' }
+    }
+    if ($OutboxEstado -in @('EXPIRADO', 'TRANSFERIDO', 'QUARANTINE')) {
+        return @{ diagnostic = 'TERMINAL'; action = 'gestionar estado terminal (12.10/12.11)'; confidence = 'alta' }
+    }
+    if ($LeaseVencido) {
+        return @{ diagnostic = 'EXPIRED'; action = 'ejecutar scan (12.10) para RETRY/RESUME/RECONCILE'; confidence = 'alta' }
+    }
+    if ($null -eq $SessionState -or -not $SessionState.checkable) {
+        return @{ diagnostic = 'UNKNOWN'; action = 'no se pudo verificar la sesion destino'; confidence = 'baja' }
+    }
+    $st = $SessionState.status
+    $grow = [bool]$SessionState.growing
+    if ($st -eq 'error') {
+        return @{ diagnostic = 'PROVIDER_DOWN'; action = 'fallo del proveedor, agente sano: renovar lease y esperar (12.10)'; confidence = 'alta' }
+    }
+    if ($st -eq 'busy') {
+        if ($grow) { return @{ diagnostic = 'WORKING'; action = 'esperar (renovar lease si aplica, 12.4a)'; confidence = 'alta' } }
+        return @{ diagnostic = 'ACKED_QUIETA'; action = 'investigar: agente en busy sin crecimiento, posible atasco'; confidence = 'media' }
+    }
+    if ($st -eq 'idle') {
+        if ($grow) { return @{ diagnostic = 'WORKING'; action = 'esperar'; confidence = 'media' } }
+        return @{ diagnostic = 'QUIETA_SIN_ACK'; action = 'circuit breaker 12.9: verificar ACK en audit; si no, escalar (12.10)'; confidence = 'media' }
+    }
+    if ($grow) { return @{ diagnostic = 'CRECE_SIN_ACK'; action = 'esperar: la sesion crece, renovar lease (12.4a)'; confidence = 'media' } }
+    return @{ diagnostic = 'QUIETA_SIN_ACK'; action = 'circuit breaker 12.9: escalar (12.10/12.11)'; confidence = 'media' }
+}
+
+function Get-CrossPoll {
+    param(
+        [Parameter(Mandatory=$true)][string]$MsgId,
+        [string]$OutboxPath = '',
+        [string]$AuditPath = '',
+        [int]$TimeoutSec = 0,
+        [int]$IntervalMs = 3000,
+        [int]$WaitMs = 15000,
+        [int]$Port = 0,
+        [string]$Password = '',
+        [scriptblock]$SessionFn,
+        [scriptblock]$SleepFn
+    )
+    if (-not $OutboxPath) { $OutboxPath = (Get-DiagPaths).outbox }
+    if (-not $AuditPath) { $AuditPath = (Get-DiagPaths).audit }
+    $entry = @(Read-OutboxLog -Path $OutboxPath | Where-Object { $_.msg_id -eq $MsgId }) | Select-Object -First 1
+    if (-not $entry) {
+        return @{ ok = $false; err = 'OUTBOX_MSG_NOT_FOUND'; detail = $MsgId; diagnostic = 'NOT_FOUND'; action = 'verificar msg_id' }
+    }
+    $deadline = $null
+    if ($TimeoutSec -gt 0) { $deadline = (Get-Date).AddSeconds($TimeoutSec) }
+    $last = $null
+    do {
+        $entry = @(Read-OutboxLog -Path $OutboxPath | Where-Object { $_.msg_id -eq $MsgId }) | Select-Object -First 1
+        if (-not $entry) {
+            $last = @{ ok = $false; diagnostic = 'NOT_FOUND'; action = 'msg_id desaparecio del outbox' }
+            break
+        }
+        $audit = Find-AuditOutcome -MsgId $MsgId -AuditPath $AuditPath
+        $leaseVencido = $false
+        if ($entry.lease -match '@(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)') {
+            try {
+                $leaseVencido = ([System.DateTime]::Parse($Matches[1]).ToUniversalTime() -lt (Get-Date).ToUniversalTime())
+            } catch { $leaseVencido = $true }
+        }
+        $sess = $null
+        if ($entry.estado -eq 'EN_VUELO') {
+            $sess = Get-SessionState -SessionId $entry.dest -Port $Port -Password $Password -WaitMs $WaitMs -SessionFn $SessionFn -SleepFn $SleepFn
+        }
+        $diag = Get-PollDiagnostic -OutboxEstado $entry.estado -NackDetected:($null -ne $audit.nack) -AckDetected:($null -ne $audit.ack) -LeaseVencido:$leaseVencido -SessionState $sess
+        $last = @{
+            ok = $true
+            msg_id = $MsgId
+            dest = $entry.dest
+            outbox_state = $entry.estado
+            diagnostic = $diag.diagnostic
+            action = $diag.action
+            confidence = $diag.confidence
+            session_status = $(if ($sess) { $sess.status } else { '' })
+            session_growing = $(if ($sess) { $sess.growing } else { $null })
+            nack_reason = $(if ($audit.nack) { $audit.nack.reason } else { '' })
+            lease_expired = $leaseVencido
+        }
+        if (-not $deadline) { break }
+        if ($diag.diagnostic -in @('ACKED', 'NACKED', 'TERMINAL')) { break }
+        if ($SleepFn) { & $SleepFn $IntervalMs } else { Start-Sleep -Milliseconds $IntervalMs }
+    } while ((Get-Date) -lt $deadline)
+    return $last
+}
+
+function Get-CrossStatus {
+    param(
+        [string]$MsgId = '',
+        [string]$RunId = '',
+        [string]$Agent = '',
+        [string]$OutboxPath = '',
+        [string]$StatePath = '',
+        [string]$EscalatedPath = '',
+        [string]$DlqPath = '',
+        [string]$AuditPath = '',
+        [int]$Port = 0,
+        [string]$Password = '',
+        [int]$WaitMs = 15000,
+        [scriptblock]$SessionFn,
+        [scriptblock]$SleepFn
+    )
+    if (-not $OutboxPath) { $OutboxPath = (Get-DiagPaths).outbox }
+    if (-not $StatePath) { $StatePath = (Get-DiagPaths).idempotencia }
+    if (-not $EscalatedPath) { $EscalatedPath = (Get-DiagPaths).escalated }
+    if (-not $DlqPath) { $DlqPath = (Get-DiagPaths).dlq }
+    if (-not $AuditPath) { $AuditPath = (Get-DiagPaths).audit }
+
+    $entries = @(Read-OutboxLog -Path $OutboxPath)
+    if ($MsgId) { $entries = @($entries | Where-Object { $_.msg_id -eq $MsgId }) }
+    if ($RunId) { $entries = @($entries | Where-Object { $_.run_id -eq $RunId }) }
+    if ($Agent) { $entries = @($entries | Where-Object { $_.dest -eq $Agent }) }
+
+    $byState = @{}
+    foreach ($e in $entries) {
+        $k = $e.estado; if (-not $k) { $k = 'SIN_ESTADO' }
+        $byState[$k] = [int]$byState[$k] + 1
+    }
+
+    $byAgent = @{}
+    foreach ($e in $entries) {
+        if (-not $e.dest) { continue }
+        if (-not $byAgent.ContainsKey($e.dest)) {
+            $byAgent[$e.dest] = [ordered]@{ agent = $e.dest; en_vuelo = 0; confirmado = 0; expirado = 0; nacked = 0; terminal = 0; total = 0; last_seen = '' }
+        }
+        $a = $byAgent[$e.dest]
+        switch ($e.estado) {
+            'EN_VUELO' { $a.en_vuelo++; if ($e.lease -match '@(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)') { $a.last_seen = $Matches[1] } }
+            'CONFIRMADO' { $a.confirmado++ }
+            'EXPIRADO' { $a.expirado++ }
+            'NACKED' { $a.nacked++ }
+            default { $a.terminal++ }
+        }
+        $a.total++
+    }
+    $agents = New-Object System.Collections.ArrayList
+    foreach ($k in $byAgent.Keys) {
+        $a = $byAgent[$k]
+        $st = $null
+        if ($SessionFn -or $Port) { $st = Get-SessionState -SessionId $k -Port $Port -Password $Password -WaitMs $WaitMs -SessionFn $SessionFn -SleepFn $SleepFn }
+        [void]$agents.Add([ordered]@{
+            agent = $a.agent; en_vuelo = $a.en_vuelo; confirmado = $a.confirmado; expirado = $a.expirado
+            nacked = $a.nacked; terminal = $a.terminal; total = $a.total; last_seen = $a.last_seen
+            state = $(if ($st) { if ($st.status) { $st.status } elseif ($st.growing) { 'growing' } else { 'quiet' } } else { 'unknown' })
+        })
+    }
+
+    $expiredUnmanaged = New-Object System.Collections.ArrayList
+    foreach ($e in $entries) {
+        if ($e.estado -ne 'EN_VUELO' -or -not $e.lease) { continue }
+        $vencido = $false
+        if ($e.lease -match '@(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)') {
+            try { $vencido = ([System.DateTime]::Parse($Matches[1]).ToUniversalTime() -lt (Get-Date).ToUniversalTime()) } catch { $vencido = $true }
+        }
+        if ($vencido) {
+            [void]$expiredUnmanaged.Add([ordered]@{ msg_id = $e.msg_id; dest = $e.dest; lease = $e.lease; attempt = $e.attempt })
+        }
+    }
+
+    $idem = @(Read-IdempotenciaLog -Path $StatePath)
+    if ($MsgId) { $idem = @($idem | Where-Object { $_.msg_id -eq $MsgId }) }
+    $idemByState = @{}
+    $lastPerMsg = @{}
+    foreach ($rec in $idem) {
+        $lastPerMsg[$rec.msg_id] = $rec
+        $k = if ($rec.state -match '^CLAIMED_BY=') { 'CLAIMED' } else { $rec.state }
+        $idemByState[$k] = [int]$idemByState[$k] + 1
+    }
+    $claimedOrphaned = New-Object System.Collections.ArrayList
+    $claimers = @{}
+    foreach ($k in $lastPerMsg.Keys) {
+        $rec = $lastPerMsg[$k]
+        if ($rec.state -match '^CLAIMED_BY=(.+)$') {
+            $owner = $Matches[1]
+            if (-not $claimers.ContainsKey($owner)) { $claimers[$owner] = New-Object System.Collections.ArrayList }
+            [void]$claimers[$owner].Add($rec.msg_id)
+        }
+    }
+    foreach ($o in $claimers.Keys) {
+        $st = $null
+        if ($SessionFn -or $Port) { $st = Get-SessionState -SessionId $o -Port $Port -Password $Password -WaitMs $WaitMs -SessionFn $SessionFn -SleepFn $SleepFn }
+        $quiet = $null
+        if ($st) { $quiet = -not $st.growing }
+        foreach ($mid in $claimers[$o]) {
+            [void]$claimedOrphaned.Add([ordered]@{
+                msg_id = $mid; owner = $o; claimer_quiet = $quiet; claimer_checked = ($null -ne $quiet)
+                claimer_status = $(if ($st) { $st.status } else { 'unreachable' })
+            })
+        }
+    }
+
+    $escalated = @(Read-EscalatedLog -Path $EscalatedPath)
+    $escalatedPending = @($escalated | Where-Object { -not $_.recibido -and $_.kind -eq 'URGENTE' })
+    $avisoSpof = @($escalated | Where-Object { $_.kind -eq 'AVISO-SPOF' })
+
+    $dlq = @(Read-DlqLog -Path $DlqPath)
+    $dlqUnread = @($dlq | Where-Object { $_.unread })
+    $dlqByFlag = @{}
+    $validFlags = @('HUMAN_REVIEW', 'NACK_ORIGINATED', 'QUARANTINE', 'PROVIDER_DOWN')
+    foreach ($d in $dlq) {
+        $f = $d.flag
+        if (-not $f -or $f -notin $validFlags) { $f = 'UNKNOWN' }
+        $dlqByFlag[$f] = [int]$dlqByFlag[$f] + 1
+    }
+
+    $lifecycle = $null
+    if ($MsgId) {
+        $auditLines = New-Object System.Collections.ArrayList
+        $audit = $AuditPath
+        if (Test-Path -LiteralPath $audit) {
+            $pat = 'msg=' + [regex]::Escape($MsgId) + '(\s|;|\||$)'
+            foreach ($line in (Get-Content -LiteralPath $audit)) {
+                if ($line -match $pat) { [void]$auditLines.Add($line.Trim()) }
+            }
+        }
+        $lifecycle = [ordered]@{
+            msg_id = $MsgId
+            outbox = @($entries)
+            idempotencia = @($idem)
+            audit = @($auditLines)
+        }
+    }
+
+    return @{
+        ok = $true
+        outbox_by_state = $byState
+        outbox_by_agent = @($agents)
+        expired_unmanaged = @($expiredUnmanaged)
+        idempotencia_by_state = $idemByState
+        claimed_orphaned = @($claimedOrphaned)
+        escalated_pending = @($escalatedPending)
+        aviso_spof = @($avisoSpof)
+        dlq_unread = @($dlqUnread)
+        dlq_by_flag = $dlqByFlag
+        lifecycle = $lifecycle
+    }
+}
+
+function Get-CrossReconcile {
+    param(
+        [Parameter(Mandatory=$true)][string]$MsgId,
+        [Parameter(Mandatory=$true)][string]$CheckFile,
+        [string]$ExpectedToken = '',
+        [string]$OutboxPath = ''
+    )
+    if (-not $OutboxPath) { $OutboxPath = (Get-DiagPaths).outbox }
+    $entry = @(Read-OutboxLog -Path $OutboxPath | Where-Object { $_.msg_id -eq $MsgId }) | Select-Object -First 1
+    if (-not $ExpectedToken -and $entry) { $ExpectedToken = [string]$entry.token }
+    $meta = @{ exists = $false; size = 0; mtime = ''; lines = 0; line_found = 0; token = $ExpectedToken }
+    if (Test-Path -LiteralPath $CheckFile) {
+        $fi = Get-Item -LiteralPath $CheckFile
+        $meta.exists = $true
+        $meta.size = $fi.Length
+        $meta.mtime = $fi.LastWriteTimeUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $all = @(Get-Content -LiteralPath $CheckFile)
+        $meta.lines = $all.Count
+        if ($ExpectedToken) {
+            for ($i = 0; $i -lt $all.Count; $i++) {
+                if ($all[$i] -match [regex]::Escape($ExpectedToken)) { $meta.line_found = $i + 1; break }
+            }
+        }
+    }
+    $verdict = 'NOT_FOUND'; $recommendation = 'retry'
+    if ($meta.line_found -gt 0) { $verdict = 'CONFIRMED'; $recommendation = 'mark_confirmed' }
+    elseif ($meta.exists -and $meta.lines -eq 0) { $verdict = 'AMBIGUOUS'; $recommendation = 'retry' }
+    elseif ($meta.exists -and $meta.lines -gt 0) { $verdict = 'AMBIGUOUS'; $recommendation = 'investigate' }
+    return @{
+        ok = $true
+        msg_id = $MsgId
+        check_file = $CheckFile
+        expected_token = $ExpectedToken
+        verdict = $verdict
+        recommendation = $recommendation
+        file = $meta
+    }
+}
+
+function Write-AppendDiagLine {
+    param([string]$Path, [string]$Line)
+    $parent = Split-Path -Parent $Path
+    if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    [System.IO.File]::AppendAllText($Path, $Line + "`n", (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Get-CrossAvisoSpof {
+    param(
+        [string]$OutboxPath = '',
+        [string]$EscalatedPath = '',
+        [string]$MySessionId = '',
+        [switch]$Apply,
+        [int]$Port = 0,
+        [string]$Password = '',
+        [int]$WaitMs = 15000,
+        [scriptblock]$SessionFn,
+        [scriptblock]$NotifyFn,
+        [scriptblock]$SleepFn
+    )
+    if (-not $OutboxPath) { $OutboxPath = (Get-DiagPaths).outbox }
+    if (-not $EscalatedPath) { $EscalatedPath = (Get-DiagPaths).escalated }
+    $cfg = Get-CrossConfig
+    if (-not $MySessionId) { $MySessionId = [string]$cfg.my_session_id }
+    $targetSession = if ($cfg.lider_session_id) { [string]$cfg.lider_session_id } else { $MySessionId }
+    $vencidos = @(Find-CrossOutboxPending -Path $OutboxPath | Where-Object { $_.vencido })
+    $results = New-Object System.Collections.ArrayList
+    $written = New-Object System.Collections.ArrayList
+    $notified = New-Object System.Collections.ArrayList
+    foreach ($e in $vencidos) {
+        if ($e.dest -eq $MySessionId) {
+            $st = Get-SessionState -SessionId $MySessionId -Port $Port -Password $Password -WaitMs $WaitMs -SessionFn $SessionFn -SleepFn $SleepFn
+            $mineQuiet = (-not [bool]$st.growing)
+            if ($mineQuiet) {
+                [void]$results.Add([ordered]@{ msg_id = $e.msg_id; dest = $e.dest; action = 'aviso-spof'; detail = 'EN_VUELO vencido y mi sesion quieta' })
+                if ($Apply) {
+                    $line = "AVISO-SPOF | msg_id=$($e.msg_id) | para=$($e.dest) | de=$MySessionId | expira=$((Get-Date).ToUniversalTime().AddMinutes(3).ToString('yyyy-MM-ddTHH:mm:ssZ')) | 'EN_VUELO vencido, sesion quieta'"
+                    Write-AppendDiagLine -Path $EscalatedPath -Line $line
+                    [void]$written.Add($e.msg_id)
+                }
+            } else {
+                [void]$results.Add([ordered]@{ msg_id = $e.msg_id; dest = $e.dest; action = 'creciendo'; detail = 'lease vencido pero mi sesion crece: esperar' })
+            }
+        } else {
+            [void]$results.Add([ordered]@{ msg_id = $e.msg_id; dest = $e.dest; action = 'notify-lider'; detail = 'mensaje caido para otra sesion: avisar al lider' })
+            if ($Apply) {
+                if ($NotifyFn) {
+                    [void](& $NotifyFn $e.dest $e.msg_id)
+                } elseif ($Port) {
+                    $body = "AVISO-SPOF | hay un mensaje caido para $($e.dest) | msg_id=$($e.msg_id) | de=$MySessionId"
+                    $payload = @{ parts = @(@{ type = 'text'; text = $body }) } | ConvertTo-Json -Depth 4
+                    [void](Invoke-CrossApi -Method 'POST' -Path "/session/$targetSession/prompt_async" -BodyJson $payload -Port $Port -Password $Password)
+                }
+                [void]$notified.Add($e.msg_id)
+            }
+        }
+    }
+    return @{
+        ok = $true
+        vencidos = $vencidos.Count
+        dry_run = (-not $Apply)
+        results = @($results)
+        written = @($written)
+        notified = @($notified)
+    }
+}
+
+function Get-CrossMetrics {
+    param(
+        [string]$Since = '',
+        [string]$Until = '',
+        [string]$ByAgent = '',
+        [string]$LogPath = ''
+    )
+    $cfg = Get-CrossConfig
+    $dir = if ($cfg.whiteboard_dir) { [Environment]::ExpandEnvironmentVariables([string]$cfg.whiteboard_dir) } else { Split-Path -Parent (Get-OutboxPath) }
+    if (-not $LogPath) { $LogPath = Join-Path $dir 'delivery_log.jsonl' }
+    if (-not (Test-Path -LiteralPath $LogPath)) {
+        return @{ ok = $false; err = 'LOG_NOT_FOUND'; detail = $LogPath }
+    }
+    $sinceDt = $null
+    $untilDt = $null
+    if ($Since) {
+        try { $sinceDt = [System.DateTime]::Parse($Since).ToUniversalTime() }
+        catch { return @{ ok = $false; err = 'USAGE_ERROR'; detail = "--since formato invalido: '$Since' (usar ISO8601, p. ej. 2026-08-13T00:00:00Z)" } }
+    }
+    if ($Until) {
+        try { $untilDt = [System.DateTime]::Parse($Until).ToUniversalTime() }
+        catch { return @{ ok = $false; err = 'USAGE_ERROR'; detail = "--until formato invalido: '$Until' (usar ISO8601, p. ej. 2026-08-13T00:00:00Z)" } }
+    }
+
+    $latencies = New-Object System.Collections.ArrayList
+    $outcome = @{ ACK = 0; NACK = 0; TIMEOUT = 0; ERROR = 0; NO_ACK = 0; OTHER = 0 }
+    $attempts = @{}
+    $leaseRenewals = 0
+    $total = 0
+    $nackReasons = @{}
+    $byAgentCounts = @{}
+    $quarantine = 0
+    $dlq = 0
+
+    foreach ($raw in (Get-Content -LiteralPath $LogPath)) {
+        if (-not $raw.Trim()) { continue }
+        $j = $null
+        try { $j = $raw | ConvertFrom-Json } catch { continue }
+        if (-not $j) { continue }
+        $ts = $null
+        if ($j.ts) {
+            try { $ts = [System.DateTime]::Parse([string]$j.ts).ToUniversalTime() } catch { }
+        }
+        if ($ts) {
+            if ($sinceDt -and $ts -lt $sinceDt) { continue }
+            if ($untilDt -and $ts -gt $untilDt) { continue }
+        }
+        $dest = if ($j.PSObject.Properties['dest']) { [string]$j.dest } else { '' }
+        if ($ByAgent -and $dest -ne $ByAgent) { continue }
+        $total++
+        $agentKey = if ($dest) { $dest } else { '(sin dest)' }
+        if ($byAgentCounts.ContainsKey($agentKey)) { $byAgentCounts[$agentKey]++ } else { $byAgentCounts[$agentKey] = 1 }
+
+        $st = if ($j.state) { [string]$j.state } else { '' }
+        $nackFlag = $false
+        if ($j.PSObject.Properties['nack']) { $nackFlag = [bool]$j.nack }
+        $reasonCode = if ($j.PSObject.Properties['reason_code']) { [string]$j.reason_code } else { '' }
+        $err = if ($j.PSObject.Properties['err']) { [string]$j.err } else { '' }
+        # F4/F6 (2026-08-13): clasificar por estado, no por el flag ack, para no
+        # contar como OTHER las lineas historicas CONFIRMADO con ack=false
+        # (formato experimental de tests viejos) ni las fire-and-forget.
+        if ($st -eq 'CONFIRMADO') { $outcome.ACK++ }
+        elseif ($nackFlag -or ($reasonCode -match '^NACK')) {
+            $outcome.NACK++
+            $reason = if ($j.PSObject.Properties['reason']) { [string]$j.reason } else { $reasonCode }
+            if ($nackReasons.ContainsKey($reason)) { $nackReasons[$reason]++ } else { $nackReasons[$reason] = 1 }
+        }
+        elseif ($st -eq 'EXPIRADO' -and $err -eq 'ACK_TIMEOUT') { $outcome.TIMEOUT++ }
+        elseif ($err) { $outcome.ERROR++ }
+        elseif ($st -eq 'PENDING' -or $st -eq 'EN_VUELO') { $outcome.NO_ACK++ }
+        else { $outcome.OTHER++ }
+
+        $ackLatency = if ($j.PSObject.Properties['ack_latency_ms'] -and $null -ne $j.ack_latency_ms -and $j.ack_latency_ms -gt 0) { [int]$j.ack_latency_ms } else { 0 }
+        if ($ackLatency -gt 0) { [void]$latencies.Add($ackLatency) }
+        $attemptVal = if ($j.PSObject.Properties['attempt'] -and $null -ne $j.attempt) { [int]$j.attempt } else { -1 }
+        if ($attemptVal -ge 0) {
+            if ($attempts.ContainsKey("$attemptVal")) { $attempts["$attemptVal"]++ } else { $attempts["$attemptVal"] = 1 }
+        }
+        if ($j.PSObject.Properties['session_growing'] -and $j.session_growing) { $leaseRenewals++ }
+        $cmd = if ($j.PSObject.Properties['cmd']) { [string]$j.cmd } else { '' }
+        if ($cmd -eq 'quarantine') { $quarantine++ }
+        if ($cmd -eq 'dlq') { $dlq++ }
+    }
+
+    $p50 = $null; $p95 = $null
+    if ($latencies.Count -gt 0) {
+        $sorted = @($latencies | Sort-Object)
+        $p50 = $sorted[[math]::Floor($sorted.Count * 0.50)]
+        $p95 = $sorted[[math]::Floor($sorted.Count * 0.95)]
+    }
+    $rates = @{
+        ack = if ($total -gt 0) { [math]::Round(100.0 * $outcome.ACK / $total, 1) } else { 0 }
+        nack = if ($total -gt 0) { [math]::Round(100.0 * $outcome.NACK / $total, 1) } else { 0 }
+        timeout = if ($total -gt 0) { [math]::Round(100.0 * $outcome.TIMEOUT / $total, 1) } else { 0 }
+        error = if ($total -gt 0) { [math]::Round(100.0 * $outcome.ERROR / $total, 1) } else { 0 }
+    }
+    $topNackLimit = 10
+    $topNack = @()
+    foreach ($k in @($nackReasons.Keys | Sort-Object { -$nackReasons[$_] })) {
+        $topNack += [ordered]@{ reason = $k; count = $nackReasons[$k] }
+        if ($topNack.Count -ge $topNackLimit) { break }
+    }
+    return @{
+        ok = $true; source = 'delivery_log.jsonl'; log_path = $LogPath; total = $total
+        by_outcome = $outcome; rates = $rates
+        latency_p50_ms = $p50; latency_p95_ms = $p95
+        attempts = $attempts; lease_renewals = $leaseRenewals
+        top_nack = @($topNack); quarantine = $quarantine; dlq = $dlq
+        by_agent = $byAgentCounts
+    }
+}
+
+Export-ModuleMember -Function Get-CrossPoll, Get-CrossStatus, Get-CrossReconcile, Get-CrossAvisoSpof, Get-SessionState, Read-EscalatedLog, Read-DlqLog, Find-AuditOutcome, Get-CrossMetrics, Get-PollDiagnostic

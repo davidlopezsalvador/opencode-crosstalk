@@ -1,0 +1,38 @@
+# CROSS-TALK .gitignore
+
+# Runtime state (generated during execution)
+whiteboard/
+outbox.md
+idempotencia-procesados.md
+delivery_log.jsonl
+audit_log.md
+escalated.md
+dlq-mensajes.md
+task_status.md
+
+# Temporary files
+tmp/
+*.tmp
+
+# Logs
+*.log
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# PowerShell
+*.pssc
+*.psrc
+
+# Session IDs (auto-generated, never commit)
+cross.config.local.json
