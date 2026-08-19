@@ -9,6 +9,29 @@ mixed current specification with changelog and PowerShell pitfalls).
 
 ## Versions
 
+### v1.8.3 (2026-08-19) — close BUG II + T-transport SKIP guard (pre-publication)
+
+Third GLM review of the v1.8.2 package found 1 real bug introduced by the
+translation and 1 gap:
+
+- **BUG II (critical):** the DLQ writer emitted `STATUS=UNREAD` while the
+  parser read `ESTADO=` (and doc/T-status fixture used `ESTADO=`). The
+  `unread` flag was never set on parsed entries, so `cross status` reported
+  `dlq_unread = 0` even with unpicked DLQ entries. Fixed: writer now emits
+  `ESTADO=UNREAD` (parser + doc + fixture already used `ESTADO=`). Added a
+  round-trip test in T-dlq (`Write-CrossDlq` → `Read-DlqLog`: entry parsed,
+  `unread=true`, `to`/`from`/`retries` correct). The test needed
+  `Import-Module cross-diagnostic` and an `@()` wrapper around
+  `Read-DlqLog` (PowerShell unwraps the 1-element result into the
+  OrderedDictionary itself).
+- **T-transport SKIP guard:** server-dependent scenarios (password, health,
+  port override, errors, cache, scan) now SKIP with a clear message when
+  there is no OpenCode Desktop server logs/password (publish template),
+  matching the T-e2e pattern. The standalone regex fixture
+  (`Get-CrossPortFromLog`) and config checks always run.
+
+Suite result: **512 pass, 0 fail, 4 skip** (was 509 pass / 0 fail).
+
 ### v1.8.2 (2026-08-19) — close the 31 pre-existing test failures (pre-publication)
 
 GLM's second review confirmed all v1.8 bugs closed and recommended fixing

@@ -3,7 +3,12 @@
 Reference document so that any agent in this project can communicate
 with other open chats/sessions in the same project.
 
-> **Current version: v1.8.2 (2026-08-19).** v1.8.2 closes the 31
+> **Current version: v1.8.3 (2026-08-19).** v1.8.3 closes BUG II found by
+> GLM's third review: the DLQ writer now emits `ESTADO=UNREAD` (was
+> `STATUS=UNREAD`), matching the parser, §12.7 doc and T-status fixture, so
+> `cross status` reports `dlq_unread` correctly; a round-trip test was added
+> to T-dlq. T-transport also gained a SKIP guard for server-dependent
+> scenarios (same pattern as T-e2e). v1.8.2 closes the 31
 > pre-existing test failures GLM's second review flagged before publication:
 > tests now adapt to the publish template's empty identity or SKIP with a
 > clear message (cause a), all module messages are translated to English

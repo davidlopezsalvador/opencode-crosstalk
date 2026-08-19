@@ -306,7 +306,7 @@ function Write-CrossDlq {
     if (-not $To) { $To = if ($entry) { [string]$entry.dest } else { '' } }
     if (-not $Retries) { $Retries = if ($entry) { [string][Math]::Max(0, [int]$entry.attempt - 1) } else { '0' } }
     $ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    $line = "[$ts] DLQ | $MsgId | to=$To | from=$myId | retries=$Retries | STATUS=UNREAD | flag=$Flag"
+    $line = "[$ts] DLQ | $MsgId | to=$To | from=$myId | retries=$Retries | ESTADO=UNREAD | flag=$Flag"
     if ($Summary) { $line += " | '$Summary'" }
     $res = Add-CrossLogLine -Path $DlqPath -Line $line
     if (-not $res.ok) { return @{ ok = $false; err = $res.err; detail = $res.detail } }

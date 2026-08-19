@@ -18,6 +18,14 @@ Assert-True ($null -ne $cfg) 'Import-CrossConfig returns object' ($cfg.GetType()
 Assert-True ($cfg.my_role -eq 'leader') 'config.my_role=leader' $cfg.my_role
 Assert-True ($cfg.protocol_version.Length -gt 0) 'config.protocol_version present'
 
+$logDir = "$env:APPDATA\ai.opencode.desktop\logs"
+$haveServer = (Test-Path $logDir) -and [bool](Get-ChildItem $logDir -ErrorAction SilentlyContinue) -and [bool](Get-CrossPassword)
+
+if (-not $haveServer) {
+    Write-Host "  SKIP  server-dependent scenarios: no OpenCode Desktop server logs/password in this environment (publish template)"
+}
+
+if ($haveServer) {
 Write-Host "== T-transport: password =="
 $pw = Get-CrossPassword
 if ($pw) {
@@ -61,7 +69,13 @@ $badHash = Get-PasswordHash 'wrong'
 $cachedBad = Get-CrossPortFromCache -TtlSeconds 60 -PasswordHash $badHash
 Assert-True ($null -eq $cachedBad) 'cache with wrong password rejected' $cachedBad
 
-Write-Host "== T-transport: Get-CrossPortFromLog (main.log regex) =="
+Write-Host "== T-transport: Get-CrossPortByScan (TCP scan + health) =="
+$rango = @($ep.port, $ep.port + 1)
+$scanned = Get-CrossPortByScan -ScanRange $rango
+Assert-True ($scanned -eq $ep.port) 'scan finds the real port (only the healthy one)' $scanned
+}
+
+Write-Host "== T-transport: Get-CrossPortFromLog (main.log regex, standalone fixture) =="
 $logsRoot = Join-Path $env:TEMP ('cross_tlogs_' + [System.Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path (Join-Path $logsRoot '2026-08-13') -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $logsRoot '2026-08-12') -Force | Out-Null
@@ -86,11 +100,6 @@ try {
 } finally {
     [Environment]::SetEnvironmentVariable('CROSS_DESKTOP_LOGS_DIR', $oldEnv2)
 }
-
-Write-Host "== T-transport: Get-CrossPortByScan (TCP scan + health) =="
-$rango = @($ep.port, $ep.port + 1)
-$scanned = Get-CrossPortByScan -ScanRange $rango
-Assert-True ($scanned -eq $ep.port) 'scan finds the real port (only the healthy one)' $scanned
 
 Write-Host ""
 Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)

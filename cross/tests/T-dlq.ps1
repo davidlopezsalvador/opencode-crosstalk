@@ -4,6 +4,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-action.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-transport.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-state.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\cross-diagnostic.psm1') -Force
 
 $pass = 0; $fail = 0
 function Assert-True {
@@ -32,7 +33,7 @@ New-Fixture
 $r = Write-CrossDlq -MsgId 'msg_d' -To 'ses_X' -Retries '3' -Flag 'HUMAN_REVIEW' -Summary 'agent not responding' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
 Assert-True ($r.ok) 'dlq ok' $r.err
 Assert-True ($r.written) 'written' $r.written
-Assert-True ($r.line -match '^\[.*\] DLQ \| msg_d \| to=ses_X \| from=leader \| retries=3 \| STATUS=UNREAD \| flag=HUMAN_REVIEW') 'canonical format' $r.line
+Assert-True ($r.line -match '^\[.*\] DLQ \| msg_d \| to=ses_X \| from=leader \| retries=3 \| ESTADO=UNREAD \| flag=HUMAN_REVIEW') 'canonical format' $r.line
 Assert-True ($r.line -match "'agent not responding'") 'summary in quotes' $r.line
 
 Write-Host "== T-dlq: persisted in dlq-messages.md =="
@@ -40,6 +41,14 @@ New-Fixture
 $r = Write-CrossDlq -MsgId 'msg_d' -To 'ses_X' -Retries '3' -Flag 'HUMAN_REVIEW' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
 $content = Get-Content -LiteralPath $script:DlqFile -Raw
 Assert-True ($content -match 'DLQ \| msg_d \| to=ses_X') 'DLQ in file' $content
+
+Write-Host "== T-dlq: round-trip writer -> parser (BUG II) =="
+New-Fixture
+$r = Write-CrossDlq -MsgId 'msg_d' -To 'ses_X' -Retries '3' -Flag 'HUMAN_REVIEW' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
+$dlqEntries = @(Read-DlqLog -Path $script:DlqFile)
+Assert-True ($dlqEntries.Count -eq 1) 'DLQ entry parsed (round-trip)' $dlqEntries.Count
+Assert-True ($dlqEntries[0].unread -eq $true) 'DLQ entry unread=true (round-trip)' $dlqEntries[0].unread
+Assert-True ($dlqEntries[0].to -eq 'ses_X' -and $dlqEntries[0].from -eq 'leader' -and $dlqEntries[0].retries -eq '3') 'to/from/retries parsed (round-trip)' "$($dlqEntries[0].to)|$($dlqEntries[0].from)|$($dlqEntries[0].retries)"
 
 Write-Host "== T-dlq: marks outbox ESTADO=DLQ =="
 New-Fixture
