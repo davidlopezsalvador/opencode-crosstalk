@@ -21,8 +21,9 @@ Assert-True ($cfg.protocol_version.Length -gt 0) 'config.protocol_version presen
 $logDir = "$env:APPDATA\ai.opencode.desktop\logs"
 $haveServer = (Test-Path $logDir) -and [bool](Get-ChildItem $logDir -ErrorAction SilentlyContinue) -and [bool](Get-CrossPassword)
 
+$script:serverScenarios = 6
 if (-not $haveServer) {
-    Write-Host "  SKIP  server-dependent scenarios: no OpenCode Desktop server logs/password in this environment (publish template)"
+    Write-Host "  SKIP  $($script:serverScenarios) server-dependent scenarios: no OpenCode Desktop server logs/password in this environment (publish template)"
 }
 
 if ($haveServer) {
@@ -102,5 +103,9 @@ try {
 }
 
 Write-Host ""
-Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
+if (-not $haveServer) {
+    Write-Host ("RESULT: {0} pass, {1} fail, {2} skipped (server-dependent)" -f $pass, $fail, $script:serverScenarios)
+} else {
+    Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
+}
 if ($fail -gt 0) { exit 1 } else { exit 0 }
