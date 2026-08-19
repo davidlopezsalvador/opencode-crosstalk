@@ -364,12 +364,14 @@ function Invoke-CrossAutoSweep {
     $failed = New-Object System.Collections.ArrayList
     foreach ($e in $vencidos) {
         if ($ExcludeMsgId -and $e.msg_id -eq $ExcludeMsgId) { continue }
+        if ($DryRun -and -not $Apply) {
+            [void]$swept.Add($e.msg_id)
+            continue
+        }
         $set = Set-OutboxEstado -MsgId $e.msg_id -Estado 'EXPIRADO' -Path $Path
         if ($set.ok) {
             [void]$swept.Add($e.msg_id)
-            if ($Apply -or -not $DryRun) {
-                [void](Write-AuditEntry -MsgId $e.msg_id -Dest $e.dest -Token ([string]$e.token) -Tipo 'SCAN' -Estado 'EXPIRADO' -Nota "auto-sweep: lease vencida sin ACK; marcado EXPIRADO" -AuditPath $AuditPath)
-            }
+            [void](Write-AuditEntry -MsgId $e.msg_id -Dest $e.dest -Token ([string]$e.token) -Tipo 'SCAN' -Estado 'EXPIRADO' -Nota "auto-sweep: lease vencida sin ACK; marcado EXPIRADO" -AuditPath $AuditPath)
         } else {
             [void]$failed.Add([ordered]@{ msg_id = $e.msg_id; err = $set.err })
         }

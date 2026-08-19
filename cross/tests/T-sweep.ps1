@@ -61,6 +61,21 @@ $r = Invoke-CrossAutoSweep -Path $Outbox -AuditPath $Audit -Apply
 $after = (Get-Content -LiteralPath $Outbox -Raw)
 Assert-True ($r.ok -and @($r.swept).Count -eq 0 -and $before -eq $after) 'no expired does not touch' ($r | ConvertTo-Json -Compress)
 
+Write-Host "== T-sweep: DryRun does not mutate the outbox =="
+Set-OutboxLines @(
+    "[2026-08-12T00:00:00Z] OUTBOX | msg_s7 | dest=ses_X | run_id=R1 | token=T1 | lease=ses_X@$past | ESTADO=EN_VUELO",
+    "[2026-08-12T00:00:00Z] OUTBOX | msg_s8 | dest=ses_X | run_id=R1 | token=T1 | lease=ses_X@$future | ESTADO=EN_VUELO"
+)
+$before = (Get-Content -LiteralPath $Outbox -Raw)
+$auditBefore = if (Test-Path -LiteralPath $Audit) { @(Get-Content -LiteralPath $Audit).Count } else { 0 }
+$r = Invoke-CrossAutoSweep -Path $Outbox -AuditPath $Audit -DryRun
+$after = (Get-Content -LiteralPath $Outbox -Raw)
+$auditAfter = if (Test-Path -LiteralPath $Audit) { @(Get-Content -LiteralPath $Audit).Count } else { 0 }
+Assert-True ($r.dry_run -eq $true) 'dry_run flag reported' ($r | ConvertTo-Json -Compress)
+Assert-True (@($r.swept).Count -eq 1 -and $r.swept[0] -eq 'msg_s7') 'dry-run reports the expired msg' ''
+Assert-True ($before -eq $after) 'dry-run does NOT mutate the outbox' ''
+Assert-True ($auditAfter -eq $auditBefore) 'dry-run writes NO audit' ''
+
 Write-Host ""
 Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

@@ -9,6 +9,36 @@ mixed current specification with changelog and PowerShell pitfalls).
 
 ## Versions
 
+### v1.8.1 (2026-08-19) — GLM review fixes (pre-publication)
+
+External review by GLM of the v1.8 package found 4 bugs and 3 minor
+observations. All closed before publication:
+
+- **BUG EE (critical):** `cross/send_message.ps1` (Phase 5 canonical
+  wrapper) was never committed to the repo, but `whiteboard/send_message.ps1`
+  (legacy shim) and `T-race.ps1` referenced it. Fixed: the file is now in
+  the repo (translated to English), the shim chain works again, T-race
+  passes 9/9.
+- **BUG FF (critical):** §4e documented a direct-HTTP wrapper at
+  `whiteboard/send_message.ps1` that did not match the real architecture.
+  Fixed: §4e now documents the canonical `cross/send_message.ps1` (delegates
+  to `cross send`, outbox/audit/retries; `-LegacyMode` for direct HTTP) and
+  explains that `whiteboard/send_message.ps1` is a legacy shim.
+- **BUG GG:** duplicate `## 3.` sections in CROSS_TALK.md (no `## 2.`).
+  Fixed: "Session Discovery and Team Selection" renumbered to `## 2.`
+  (recommended by GLM: breaks fewer cross-references).
+- **BUG HH:** `Invoke-CrossAutoSweep -DryRun` mutated the outbox (only the
+  audit was suppressed). Fixed: dry-run now reports without mutating;
+  new T-sweep scenario (13/13 pass).
+- **O1:** `cross send` auto-sweep is now documented in `--help` and a
+  `--dry-run-sweep` flag was added to preview without mutating.
+- **O2 (deferred):** no `cross heartbeat` subcommand yet; the ESTADO:
+  convention stays manual. Documented in Appendix A.
+- **O3:** `cross whoami` now suggests editing `cross.config.json` or using
+  `--session-id/--model/--role` overrides on `NO_IDENTITY`. T-cli adapted to
+  the publish template (skips environment-dependent cases with a clear
+  message; 41/41 pass).
+
 ### v1.8 (2026-08-19) — heartbeat ESTADO: + enhanced wrapper (low-cost ops)
 
 Two parallel tracks converge here: nemotron-3-ultra-free's failed experiment

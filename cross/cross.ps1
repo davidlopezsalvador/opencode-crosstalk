@@ -40,7 +40,7 @@ $argsList = @($Argv)
 
 $flags = [ordered]@{}
 $positionals = New-Object System.Collections.ArrayList
-$KnownFlags = @('json','human','quiet','no-cache','health-skip','port','password','config','help','directory','session','session-id','since','role','limit','get','set','list','msg','model','owner','force','state-file','outbox-file','text','dest','token','run-id','lease','sucesor','attempt','ack-timeout','max-attempts','no-wait','timeout','apply','quarantine','retry-auto','for','interval','check-file','expected-token','msg-id','agent','reason','note','for-msg-id','for-run-id','task','task-id','from','retries','flag','summary','check-log','minutes','to','log-path','by-agent','until')
+$KnownFlags = @('json','human','quiet','no-cache','health-skip','port','password','config','help','directory','session','session-id','since','role','limit','get','set','list','msg','model','owner','force','state-file','outbox-file','text','dest','token','run-id','lease','sucesor','attempt','ack-timeout','max-attempts','no-wait','timeout','apply','quarantine','retry-auto','for','interval','check-file','expected-token','msg-id','agent','reason','note','for-msg-id','for-run-id','task','task-id','from','retries','flag','summary','check-log','minutes','to','log-path','by-agent','until','dry-run-sweep')
 
 for ($i = 0; $i -lt $argsList.Count; $i++) {
     $arg = $argsList[$i]
@@ -102,7 +102,7 @@ Usage:
   cross validate  [--state-file PATH] [--outbox-file PATH]
   cross send      --msg msg_X --dest ses_Y --text "..." [--token T] [--run-id R]
                   [--ack-timeout S | --timeout S] [--max-attempts N] [--attempt N]
-                  [--no-wait] [--outbox-file PATH]
+                  [--no-wait] [--dry-run-sweep] [--outbox-file PATH]
   cross scan      [--outbox-file PATH] [--apply] [--quarantine]
                   [--retry-auto [--max-attempts N]]
   cross poll      --msg msg_X [--timeout S] [--interval MS] [--outbox-file PATH]
@@ -135,6 +135,9 @@ validate runs consistency lint (outbox vs idempotencia, lease UTC).
 send delivers an IN_FLIGHT outbox entry via prompt_async (ACK/NACK, retries, lease).
   --no-wait sends without waiting for ACK (fire-and-forget, outbox remains IN_FLIGHT).
   --ack-timeout 0 equals no ACK (requires_ack=false, outbox CONFIRMED); use --no-wait for the opposite.
+  NOTE: send ALWAYS runs an automatic sweep first (Invoke-CrossAutoSweep) that marks
+  other expired outbox entries as EXPIRADO (reported as swept_expired/swept_count).
+  Use --dry-run-sweep to preview what would be swept without mutating anything.
 scan lists IN_FLIGHT outbox entries and marks expired ones by lease.
   --apply renews the lease for expired entries (A/B); --quarantine moves them to QUARANTINE.
   --retry-auto classifies each expired entry via diagnose and applies the appropriate action
@@ -211,7 +214,7 @@ switch ($Command) {
         if ($overrideModel) { $model = $overrideModel; $source = 'override' }
         if ($overrideRole) { $role = $overrideRole; $source = 'override' }
         if (-not $sid) {
-            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'NO_IDENTITY'; detail = 'neither config nor env defines my_session_id' } -Cmd 'whoami'
+            $r = New-Result -Ok $false -Code 64 -Data @{ err = 'NO_IDENTITY'; detail = 'neither config nor env defines my_session_id. Edit cross.config.json (my_session_id/leader_session_id/my_model) or pass --session-id/--model/--role overrides.' } -Cmd 'whoami'
             Out-Result $r 'whoami' -Watch $watch
         }
         $shared = $false
@@ -504,7 +507,7 @@ switch ($Command) {
         $maxAttempts = if ($flags['max-attempts']) { [int]$flags['max-attempts'] } else { [int]$config.max_retries }
         $attempt = if ($flags['attempt']) { [int]$flags['attempt'] } else { if ($entry) { [int]$entry.attempt } else { 0 } }
         $backoffSec = if ($config.retry_backoff_s) { [int]$config.retry_backoff_s } else { 2 }
-        $sweep = Invoke-CrossAutoSweep -Path $outboxFile -ExcludeMsgId $msg -LeaseMinutes $config.default_lease_minutes
+        $sweep = Invoke-CrossAutoSweep -Path $outboxFile -ExcludeMsgId $msg -LeaseMinutes $config.default_lease_minutes -DryRun:([bool]$flags['dry-run-sweep'])
         $res = New-CrossDelivery -MsgId $msg -Dest $dest -Text $text -RunId $runId -Token $token -Lease $lease -Sucesor $sucesor -RequiereAck:$reqAck -OutboxPath $outboxFile -AckTimeoutSec $ackTimeout -MaxAttempts $maxAttempts -InitialAttempt $attempt -BackoffSec $backoffSec -NoWait:([bool]$flags['no-wait']) -Port $PortArg -Password $PasswordArg -NoCache:$NoCache -HealthSkip:$HealthSkip
         $r = New-Result -Ok $res.ok -Code $(if ($res.ok) { 0 } else { 2 }) -Data @{
             msg_id = $msg; dest = $dest; outbox_state = $res.state; attempt = $res.attempt

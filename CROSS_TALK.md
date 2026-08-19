@@ -3,7 +3,12 @@
 Reference document so that any agent in this project can communicate
 with other open chats/sessions in the same project.
 
-> **Current version: v1.8 (2026-08-19).** v1.8 adds two **low-cost
+> **Current version: v1.8.1 (2026-08-19).** v1.8.1 closes the 4 bugs found
+> by the GLM external review (pre-publication): restores
+> `cross/send_message.ps1` (BUG EE), aligns §4e with the real architecture
+> (BUG FF), renumbers the duplicate section 3 to 2 (BUG GG) and makes
+> `Invoke-CrossAutoSweep -DryRun` truly non-mutating (BUG HH). v1.8 adds
+> two **low-cost
 > operational improvements** (leader decision based on the REVISION-89
 > advisor review of nemotron's report after its failed experiment as leader,
 > plus the ESTADO-88 availability query, 3/3 verified via API):
@@ -44,7 +49,7 @@ with other open chats/sessions in the same project.
 > Golden rule: ALWAYS `prompt_async` without `noReply` to wake up (5.1, 12).
 >
 > Version history and discoveries are in **`CHANGELOG.md`**
-> (v1.1 → v1.8), Windows pitfalls in **`CROSS_WINDOWS.md`**. This
+> (v1.1 → v1.8.1), Windows pitfalls in **`CROSS_WINDOWS.md`**. This
 > file contains ONLY the current rules.
 
 ## Context
@@ -106,7 +111,7 @@ curl.exe -s -m 8 -u "opencode:$password" "http://127.0.0.1:$port/global/health"
 
 If `health` does not respond, the app has restarted: repeat the detection from scratch.
 
-## 3. Session Discovery and Team Selection
+## 2. Session Discovery and Team Selection
 
 Before initiating any task, the Leader must perform a discovery phase to identify potential collaborators:
 
@@ -359,44 +364,83 @@ This way no one guesses or copies other people's IDs.
 > any fixed value passed as parameter. It is the recommended version for
 > all sends: it eliminates the class of bug where a model uses old
 > credentials and its message does not arrive.
+>
+> **Architecture (v1.8, corrected after GLM review 2026-08-19):** the
+> canonical wrapper is **`cross/send_message.ps1`** (Phase 5): it keeps the
+> legacy signature `-Destino -Texto [-NoReply] [-Puerto -Password]`, creates
+> an outbox entry (`Add-OutboxEntry`, §12.8) and delegates the actual send to
+> the `cross send` CLI (outbox/audit/retries active). `-LegacyMode` switches
+> to the old direct-HTTP path (no outbox/audit/retries). In local projects,
+> `whiteboard/send_message.ps1` is a **legacy shim** that forwards to
+> `cross\send_message.ps1` — it is NOT a standalone implementation. Do not
+> look for a `whiteboard/send_message.ps1` that does direct HTTP: that
+> implementation lives inside `cross/send_message.ps1 -LegacyMode`.
 
-`whiteboard/send_message.ps1` (reference path within the project):
+`cross/send_message.ps1` (canonical wrapper, delegates to `cross send`):
 
 ```powershell
+# Legacy signature: -Destino -Texto [-NoReply] [-Puerto -Password] [-LegacyMode]
 param(
   [Parameter(Mandatory=$true)][string]$Destino,
   [Parameter(Mandatory=$true)][string]$Texto,
   [string]$Puerto,
   [string]$Password,
-  [switch]$NoReply
+  [switch]$NoReply,
+  [switch]$LegacyMode
 )
+$ErrorActionPreference = 'Stop'
+$MyRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Cli = Join-Path $MyRoot 'cross.ps1'
 
-# ALWAYS AUTO-DETECT: the port changes on server restart.
-# Any port/password passed as parameter is ignored.
-$logDir = "$env:APPDATA\ai.opencode.desktop\logs"
-$latestLog = Get-ChildItem $logDir | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-$Puerto = ([regex]::Match((Get-Content "$($latestLog.FullName)\main.log" -Raw),
-  "server ready.*url: 'http://127\.0\.0\.1:(\d+)'")).Groups[1].Value
-if (-not $Puerto) { throw "Could not auto-detect server port" }
+if ($LegacyMode) {
+  # Direct HTTP path: ALWAYS auto-detect credentials, ignore fixed values (RULE v1.4).
+  $logDir = "$env:APPDATA\ai.opencode.desktop\logs"
+  $latestLog = Get-ChildItem $logDir | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  $Puerto = ([regex]::Match((Get-Content "$($latestLog.FullName)\main.log" -Raw),
+    "server ready.*url: 'http://127\.0\.0\.1:(\d+)'")).Groups[1].Value
+  if (-not $Puerto) { throw "Could not auto-detect server port" }
+  $Password = $env:OPENCODE_SERVER_PASSWORD
+  if (-not $Password) { throw "OPENCODE_SERVER_PASSWORD is not defined in the environment" }
+  $payload = @{ parts = @(@{ type = "text"; text = $Texto }) }
+  if ($NoReply) { $payload.noReply = $true }
+  $json = $payload | ConvertTo-Json -Depth 4
+  $file = Join-Path $env:TEMP "send_$(Get-Random).json"
+  [System.IO.File]::WriteAllText($file, $json, [System.Text.Encoding]::ASCII)
+  $endpoint = if ($NoReply) { "message" } else { "prompt_async" }
+  curl.exe -s -m 30 -X POST -u "opencode:$Password" -H "Content-Type: application/json" `
+    --data-binary "@$file" "http://127.0.0.1:$Puerto/session/$Destino/$endpoint"
+  Remove-Item $file -ErrorAction SilentlyContinue
+  exit 0
+}
 
-$Password = $env:OPENCODE_SERVER_PASSWORD
-if (-not $Password) { throw "OPENCODE_SERVER_PASSWORD is not defined in the environment" }
-
-$payload = @{ parts = @(@{ type = "text"; text = $Texto }) }
-if ($NoReply) { $payload.noReply = $true }
-$json = $payload | ConvertTo-Json -Depth 4
-$file = Join-Path $env:TEMP "send_$(Get-Random).json"
-[System.IO.File]::WriteAllText($file, $json, [System.Text.Encoding]::ASCII)
-$endpoint = if ($NoReply) { "message" } else { "prompt_async" }
-curl.exe -s -m 30 -X POST -u "opencode:$Password" -H "Content-Type: application/json" `
-  --data-binary "@$file" "http://127.0.0.1:$Puerto/session/$Destino/$endpoint"
-Remove-Item $file -ErrorAction SilentlyContinue
+# Normal path: create outbox entry and delegate to `cross send` (outbox/audit/retries).
+Import-Module (Join-Path $MyRoot 'modules\cross-transport.psm1') -Force -DisableNameChecking
+Import-Module (Join-Path $MyRoot 'modules\cross-state.psm1') -Force -DisableNameChecking
+$config = Get-CrossConfig
+$emisor = [string]$config.my_session_id
+if (-not $emisor) { $emisor = 'lider' }
+$msgId = "msg_${emisor}_$(Get-Date -Format 'yyyyMMdd-HHmmss')-" + (Get-Random -Maximum 16777215).ToString('X6')
+$token = 'MSG-' + [System.Guid]::NewGuid().ToString('N').Substring(0, 12)
+$runId = 'RUN-' + [System.Guid]::NewGuid().ToString('N').Substring(0, 8)
+$leaseMin = if ($config.default_lease_minutes) { [int]$config.default_lease_minutes } else { 3 }
+$lease = "$Destino@" + (Get-Date).ToUniversalTime().AddMinutes($leaseMin).ToString('yyyy-MM-ddTHH:mm:ssZ')
+$whiteboard = [Environment]::ExpandEnvironmentVariables([string]$config.whiteboard_dir)
+$outbox = Join-Path $whiteboard 'outbox.md'
+$ar = Add-OutboxEntry -MsgId $msgId -Dest $Destino -RunId $runId -Token $token -Lease $lease -Path $outbox
+if (-not $ar.ok) { throw "$($ar.err): $($ar.detail)" }
+$cliArgs = @('send', "--msg=$msgId", "--dest=$Destino", "--text=$Texto")
+if ($NoReply) { $cliArgs += '--no-wait' }
+if ($Puerto) { $cliArgs += "--port=$Puerto" }
+if ($Password) { $cliArgs += "--password=$Password" }
+$raw = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Cli @cliArgs 2>$null | Out-String
+[Console]::WriteLine($raw.Trim())
+exit $LASTEXITCODE
 ```
 
 Usage:
 
 ```powershell
-& ".\whiteboard\send_message.ps1" -Destino "ses_AAAAAAAA" -Texto "YOUR_MESSAGE" -NoReply
+& ".\cross\send_message.ps1" -Destino "ses_AAAAAAAA" -Texto "YOUR_MESSAGE" -NoReply
 ```
 
 Notes:
