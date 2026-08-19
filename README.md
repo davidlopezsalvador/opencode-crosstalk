@@ -1,5 +1,7 @@
 # OpenCode Cross-Talk
 
+[![tests](https://github.com/davidlopezsalvador/opencode-crosstalk/actions/workflows/test.yml/badge.svg)](https://github.com/davidlopezsalvador/opencode-crosstalk/actions/workflows/test.yml)
+
 [User Guide for Non-Coders](USER_GUIDE.md) | [Protocol spec](CROSS_TALK.md) | [Changelog](CHANGELOG.md) | [Windows pitfalls](CROSS_WINDOWS.md)
 
 
@@ -27,7 +29,13 @@ OpenCode Desktop runs a local HTTP server (`http://127.0.0.1:PORT`) that exposes
 ### Setup
 
 1. Clone this repo
-2. Edit `cross/cross.config.json` — set your session IDs:
+2. Run the setup helper (detects your session and writes a git-ignored `cross/cross.config.local.json`):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
+```
+
+3. Or configure manually — edit `cross/cross.config.json` (or copy it to `cross/cross.config.local.json` so your identity never gets committed):
 
 ```json
 {
@@ -38,7 +46,7 @@ OpenCode Desktop runs a local HTTP server (`http://127.0.0.1:PORT`) that exposes
 }
 ```
 
-3. Run the CLI:
+4. Run the CLI:
 
 ```powershell
 cd cross
@@ -68,22 +76,50 @@ cross metrics                   # delivery statistics
 
 See `cross.ps1 --help` for the full list of 20+ subcommands.
 
+## Example: 3-session handshake in under a minute
+
+With 3 sessions open (A = you, B = advisor, C = advisor):
+
+```powershell
+# 1. Verify connectivity
+.\cross.ps1 health                       # ok: true
+
+# 2. Send a task to session B (writes outbox, wakes B via prompt_async)
+.\cross.ps1 send --msg t1 --dest ses_B --text "Analyze the poll results and reply"
+# -> outbox.md: [ts] OUTBOX | t1 | dest=ses_B | ESTADO=EN_VUELO
+
+# 3. B replies with its ACK/NACK handshake (see CROSS_TALK.md 7.1/7.5)
+#    Sender polls and classifies the outcome:
+.\cross.ps1 status
+# -> t1 CONFIRMADO (ACK:T1:ses_B:model received)
+
+# 4. B fails to answer in time -> diagnose why, then retry or escalate
+.\cross.ps1 diagnose --msg t1             # provider down / agent sleeping / config error
+.\cross.ps1 scan                          # expired leases
+```
+
+That is the whole loop: outbox -> prompt_async -> ACK/NACK -> retry or DLQ. The
+anti-sleep protocol (`ESTADO:` heartbeats, AVISO-SPOF) keeps long-running
+teams alive — see [CROSS_TALK.md](CROSS_TALK.md) sections 4 and 12.
+
 ## Project structure
 
 ```
 cross-talk/
-├── CROSS_TALK.md              # Protocol specification (v1.6.1)
+├── CROSS_TALK.md              # Protocol specification (v1.8.3)
 ├── CHANGELOG.md               # Version history and discoveries
 ├── CROSS_WINDOWS.md           # PowerShell 5.1 / Windows pitfalls
+├── install.ps1                # One-command setup (detects session, writes local config)
 ├── LICENSE                    # MIT
 ├── README.md                  # This file
 └── cross/
     ├── cross.ps1              # CLI entry point (20+ subcommands)
-    ├── cross.config.json      # Runtime configuration
+    ├── cross.config.json      # Publish template (empty identity)
+    ├── cross.config.local.json# Your identity (git-ignored, created by install.ps1)
     ├── lib/
     │   └── cross-format.psm1  # Formatting utilities
     ├── modules/
-    │   ├── cross-transport.psm1   # HTTP transport, port detection
+    │   ├── cross-transport.psm1   # HTTP transport, port detection, config
     │   ├── cross-state.psm1       # Outbox, idempotency, mutex
     │   ├── cross-delivery.psm1    # ACK/NACK parsing, retries, leases
     │   ├── cross-diagnostic.psm1  # Polling, status, reconcile, aviso-spof

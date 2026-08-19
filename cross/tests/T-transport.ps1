@@ -18,6 +18,26 @@ Assert-True ($null -ne $cfg) 'Import-CrossConfig returns object' ($cfg.GetType()
 Assert-True ($cfg.my_role -eq 'leader') 'config.my_role=leader' $cfg.my_role
 Assert-True ($cfg.protocol_version.Length -gt 0) 'config.protocol_version present'
 
+Write-Host "== T-transport: cross.config.local.json override =="
+$cfgDir = Join-Path $env:TEMP ('cross_cfg_' + [System.Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
+$baseCfg = Join-Path $cfgDir 'cross.config.json'
+$localCfg = Join-Path $cfgDir 'cross.config.local.json'
+$baseSchema = '{"my_session_id":"","my_role":"leader","my_model":"","protocol_version":"1.8","port_cache_ttl_s":60,"max_retries":2,"retry_backoff_s":2,"default_ack_timeout_s":120,"default_lease_minutes":3,"max_saltos":2,"session_growing_check_ms":15000,"whiteboard_dir":"./whiteboard","log_path":"%USERPROFILE%\\.local\\share\\opencode\\log\\opencode.log","desktop_logs_dir":"%APPDATA%\\ai.opencode.desktop\\logs","port_scan_range":[30000,40000]}'
+[System.IO.File]::WriteAllText($baseCfg, $baseSchema, (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText($localCfg, '{"my_session_id":"ses_LOCAL","my_model":"model-x"}', (New-Object System.Text.UTF8Encoding($false)))
+$cfgL = Import-CrossConfig -ConfigPath $baseCfg
+Assert-True ($cfgL.my_session_id -eq 'ses_LOCAL') 'local override my_session_id' $cfgL.my_session_id
+Assert-True ($cfgL.my_model -eq 'model-x') 'local override my_model' $cfgL.my_model
+Assert-True ($cfgL.my_role -eq 'leader') 'base preserved when not overridden' $cfgL.my_role
+$noLocalDir = Join-Path $env:TEMP ('cross_cfg_nolocal_' + [System.Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $noLocalDir -Force | Out-Null
+$baseOnly = Join-Path $noLocalDir 'cross.config.json'
+[System.IO.File]::WriteAllText($baseOnly, '{"my_session_id":"ses_BASE","my_model":"","my_role":"advisor","port_cache_ttl_s":60}', (New-Object System.Text.UTF8Encoding($false)))
+$cfgN = Import-CrossConfig -ConfigPath $baseOnly
+Assert-True ($cfgN.my_session_id -eq 'ses_BASE') 'base used when no local file' $cfgN.my_session_id
+$null = Import-CrossConfig
+
 $logDir = "$env:APPDATA\ai.opencode.desktop\logs"
 $haveServer = (Test-Path $logDir) -and [bool](Get-ChildItem $logDir -ErrorAction SilentlyContinue) -and [bool](Get-CrossPassword)
 

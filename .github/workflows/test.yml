@@ -1,0 +1,30 @@
+name: tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run test suites (server-independent)
+        shell: pwsh
+        run: |
+          $totalP = 0; $totalF = 0
+          Get-ChildItem cross\tests\T-*.ps1 | ForEach-Object {
+            $out = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $_.FullName 2>$null
+            $res = ($out | Select-String "RESULT" | Select-Object -Last 1).ToString()
+            if ($res -match '(\d+) pass, (\d+) fail') {
+              $totalP += [int]$Matches[1]; $totalF += [int]$Matches[2]
+              Write-Host ("{0}: {1}" -f $_.Name, $res)
+            } else {
+              Write-Host ("{0}: NO RESULT" -f $_.Name)
+            }
+          }
+          Write-Host ("TOTAL: {0} pass, {1} fail" -f $totalP, $totalF)
+          if ($totalF -gt 0) { exit 1 }

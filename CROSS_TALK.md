@@ -3,7 +3,11 @@
 Reference document so that any agent in this project can communicate
 with other open chats/sessions in the same project.
 
-> **Current version: v1.8.3 (2026-08-19).** v1.8.3 closes BUG II found by
+> **Current version: v1.8.4 (2026-08-20).** v1.8.4 adds usability for
+> new users: `install.ps1` one-command setup (writes git-ignored
+> `cross/cross.config.local.json`, which `Import-CrossConfig` now merges
+> over the publish template), a CI workflow with badge, README install +
+> handshake example, CONTRIBUTING.md and issue templates. v1.8.3 closes BUG II found by
 > GLM's third review: the DLQ writer now emits `ESTADO=UNREAD` (was
 > `STATUS=UNREAD`), matching the parser, §12.7 doc and T-status fixture, so
 > `cross status` reports `dlq_unread` correctly; a round-trip test was added

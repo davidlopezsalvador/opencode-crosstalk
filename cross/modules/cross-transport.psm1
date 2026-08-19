@@ -13,6 +13,13 @@ function Import-CrossConfig {
     $configPath = [System.IO.Path]::GetFullPath($ConfigPath)
     if (-not (Test-Path -LiteralPath $configPath)) { throw "CONFIG_NOT_FOUND: $configPath" }
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    $localPath = [System.IO.Path]::ChangeExtension($configPath, 'local.json')
+    if (Test-Path -LiteralPath $localPath) {
+        $local = Get-Content -LiteralPath $localPath -Raw | ConvertFrom-Json
+        foreach ($prop in $local.PSObject.Properties) {
+            if ($null -ne $prop.Value -and "$($prop.Value)" -ne '') { $config.$($prop.Name) = $prop.Value }
+        }
+    }
     foreach ($key in @('my_session_id','my_model','my_role','whiteboard_dir','diario_dir','log_path','desktop_logs_dir')) {
         $envKey = "CROSS_MY_" + ($key.ToUpper())
         if ([Environment]::GetEnvironmentVariable($envKey)) {

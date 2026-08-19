@@ -9,6 +9,31 @@ mixed current specification with changelog and PowerShell pitfalls).
 
 ## Versions
 
+### v1.8.4 (2026-08-20) — project usability (post-publication)
+
+First post-publication iteration, focused on making the repo usable by
+strangers:
+
+- **`install.ps1`** — one-command setup: detects the OpenCode Desktop
+  server (port from logs, password from env/.env), lists sessions, picks
+  the leader (or first) session, and writes the identity to
+  `cross/cross.config.local.json` (git-ignored), then verifies with
+  `cross health`.
+- **`cross.config.local.json` override** — `Import-CrossConfig` now merges
+  a `cross.config.local.json` next to the base config when present
+  (non-empty keys win). The publish template keeps its empty identity;
+  contributors never commit their session IDs. New T-transport scenarios
+  (4 asserts).
+- **CI workflow** (`.github/workflows/test.yml`) — runs the full suite on
+  `windows-latest` (pwsh) on every push/PR; badge added to README.
+- **README** — install step, local-config docs, 3-session handshake
+  example, updated project structure.
+- **CONTRIBUTING.md + issue templates** — bug report / feature request /
+  config, plus contribution conventions (English messages, SKIP pattern,
+  tests for every change).
+
+Suite result: **516 pass, 0 fail, 4 skip** (was 512).
+
 ### v1.8.3 (2026-08-19) — close BUG II + T-transport SKIP guard (pre-publication)
 
 Third GLM review of the v1.8.2 package found 1 real bug introduced by the

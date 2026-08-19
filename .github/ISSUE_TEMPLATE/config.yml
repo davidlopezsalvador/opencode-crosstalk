@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: OpenCode Cross-Talk Discussions
+    url: https://github.com/davidlopezsalvador/opencode-crosstalk/discussions
+    about: Ask questions and discuss ideas here before opening an issue.
