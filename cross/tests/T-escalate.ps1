@@ -29,7 +29,9 @@ $r = Write-CrossEscalated -MsgId 'msg_x' -To 'ses_Y' -Reason 'no ACK after retri
 Assert-True ($r.ok) 'escalate ok' $r.err
 Assert-True ($r.written) 'written' $r.written
 Assert-True ($r.line -match '^URGENTE \| para=ses_Y \| msg_id=msg_x \| run_id=R1') 'canonical URGENTE format' $r.line
-Assert-True ($r.line -match 'de=ses_LEADER') 'de= my session' $r.line
+$mySession = [string]((Get-Content (Join-Path $PSScriptRoot '..\cross.config.json') -Raw | ConvertFrom-Json).my_session_id)
+if (-not $mySession) { $mySession = 'leader' }
+Assert-True ($r.line -match "de=$mySession") 'de= my session' $r.line
 Assert-True ($r.line -match 'expira=\d{4}-\d{2}-\d{2}T') 'expira UTC' $r.line
 Assert-True ($r.line -match "'no ACK after retries'") 'reason in quotes' $r.line
 Assert-True ($r.notified -eq $false) 'without --apply does not notify' $r.notified

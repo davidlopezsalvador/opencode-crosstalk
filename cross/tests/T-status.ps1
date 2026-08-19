@@ -45,8 +45,8 @@ URGENTE | para=ses_leader | msg_esc2 | run_id=run_esc | de=ses_A | expira=2026-0
 AVISO-SPOF | msg_id=msg_spof | para=ses_X | de=ses_A | expira=2026-08-12T00:05:00Z | 'spof alert'
 "
     $dlq = "# DLQ
-[2026-08-12T00:00:00Z] DLQ | msg_d1 | para=ses_X | de=ses_A | reintentos=3 | ESTADO=UNREAD | flag=HUMAN_REVIEW | 'unpicked'
-[2026-08-12T00:00:00Z] DLQ | msg_d2 | para=ses_X | de=ses_A | reintentos=2 | ESTADO=RECOGIDO | flag=TECHNICAL | 'picked up'
+[2026-08-12T00:00:00Z] DLQ | msg_d1 | to=ses_X | from=ses_A | retries=3 | ESTADO=UNREAD | flag=HUMAN_REVIEW | 'unpicked'
+[2026-08-12T00:00:00Z] DLQ | msg_d2 | to=ses_X | from=ses_A | retries=2 | ESTADO=RECOGIDO | flag=TECHNICAL | 'picked up'
 "
     $audit = "# audit_log.md
 | timestamp | origen | destino | token | tipo | estado | nota |

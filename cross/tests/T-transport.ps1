@@ -67,6 +67,8 @@ New-Item -ItemType Directory -Path (Join-Path $logsRoot '2026-08-13') -Force | O
 New-Item -ItemType Directory -Path (Join-Path $logsRoot '2026-08-12') -Force | Out-Null
 [System.IO.File]::WriteAllText((Join-Path $logsRoot '2026-08-12\main.log'), "something without url`n", (New-Object System.Text.UTF8Encoding($false)))
 [System.IO.File]::WriteAllText((Join-Path $logsRoot '2026-08-13\main.log'), "info line`nserver ready. opencode:// opbgr. url: 'http://127.0.0.1:61234'`n", (New-Object System.Text.UTF8Encoding($false)))
+(Get-Item (Join-Path $logsRoot '2026-08-13')).LastWriteTime = (Get-Date)
+(Get-Item (Join-Path $logsRoot '2026-08-12')).LastWriteTime = (Get-Date).AddDays(-1)
 $oldEnv = [Environment]::GetEnvironmentVariable('CROSS_DESKTOP_LOGS_DIR')
 try {
     [Environment]::SetEnvironmentVariable('CROSS_DESKTOP_LOGS_DIR', $logsRoot)

@@ -96,17 +96,17 @@ function Read-DlqLog {
         $fields = @($t -split '\|') | ForEach-Object { $_.Trim() }
         if ($fields.Count -lt 5) { continue }
         $msgId = $fields[1]
-        $para = ''; $de = ''; $reintentos = ''; $estado = ''; $flag = ''; $resumen = ''
+        $to = ''; $from = ''; $retries = ''; $estado = ''; $flag = ''; $resumen = ''
         foreach ($f in $fields) {
-            if ($f -match '^para=(.+)$') { $para = $Matches[1] }
-            elseif ($f -match '^de=(.+)$') { $de = $Matches[1] }
-            elseif ($f -match '^reintentos=(\d+)') { $reintentos = $Matches[1] }
+            if ($f -match '^to=(.+)$') { $to = $Matches[1] }
+            elseif ($f -match '^from=(.+)$') { $from = $Matches[1] }
+            elseif ($f -match '^retries=(\d+)') { $retries = $Matches[1] }
             elseif ($f -match '^ESTADO=(.+)$') { $estado = $Matches[1] }
             elseif ($f -match '^flag=(.+)$') { $flag = $Matches[1] }
             elseif ($f -match "^(?:'|\"")(.+?)(?:'|\"")$") { $resumen = $Matches[1] }
         }
         [void]$items.Add([ordered]@{
-            raw = $t; msg_id = $msgId; para = $para; de = $de; reintentos = $reintentos
+            raw = $t; msg_id = $msgId; to = $to; from = $from; retries = $retries
             estado = $estado; flag = $flag; resumen = $resumen; unread = ($estado -eq 'UNREAD')
         })
     }
@@ -161,17 +161,17 @@ function Get-PollDiagnostic {
     $st = $SessionState.status
     $grow = [bool]$SessionState.growing
     if ($st -eq 'error') {
-        return @{ diagnostic = 'PROVIDER_DOWN'; action = 'fallo del proveedor, agente sano: renovar lease y esperar (12.10)'; confidence = 'alta' }
+        return @{ diagnostic = 'PROVIDER_DOWN'; action = 'provider failure, healthy agent: renew lease and wait (12.10)'; confidence = 'alta' }
     }
     if ($st -eq 'busy') {
-        if ($grow) { return @{ diagnostic = 'WORKING'; action = 'esperar (renovar lease si aplica, 12.4a)'; confidence = 'alta' } }
-        return @{ diagnostic = 'ACKED_QUIETA'; action = 'investigar: agente en busy sin crecimiento, posible atasco'; confidence = 'media' }
+        if ($grow) { return @{ diagnostic = 'WORKING'; action = 'wait (renew lease if applicable, 12.4a)'; confidence = 'alta' } }
+        return @{ diagnostic = 'ACKED_QUIETA'; action = 'investigate: agent busy with no growth, possible stall'; confidence = 'media' }
     }
     if ($st -eq 'idle') {
-        if ($grow) { return @{ diagnostic = 'WORKING'; action = 'esperar'; confidence = 'media' } }
+        if ($grow) { return @{ diagnostic = 'WORKING'; action = 'wait'; confidence = 'media' } }
         return @{ diagnostic = 'QUIETA_SIN_ACK'; action = 'circuit breaker 12.9: verificar ACK en audit; si no, escalar (12.10)'; confidence = 'media' }
     }
-    if ($grow) { return @{ diagnostic = 'CRECE_SIN_ACK'; action = 'esperar: la sesion crece, renovar lease (12.4a)'; confidence = 'media' } }
+    if ($grow) { return @{ diagnostic = 'CRECE_SIN_ACK'; action = 'wait: the session is growing, renew lease (12.4a)'; confidence = 'media' } }
     return @{ diagnostic = 'QUIETA_SIN_ACK'; action = 'circuit breaker 12.9: escalar (12.10/12.11)'; confidence = 'media' }
 }
 
@@ -467,7 +467,7 @@ function Get-CrossAvisoSpof {
                     [void]$written.Add($e.msg_id)
                 }
             } else {
-                [void]$results.Add([ordered]@{ msg_id = $e.msg_id; dest = $e.dest; action = 'creciendo'; detail = 'lease vencido pero mi sesion crece: esperar' })
+                [void]$results.Add([ordered]@{ msg_id = $e.msg_id; dest = $e.dest; action = 'growing'; detail = 'lease expido pero mi sesion crece: esperar' })
             }
         } else {
             [void]$results.Add([ordered]@{ msg_id = $e.msg_id; dest = $e.dest; action = 'notify-leader'; detail = 'fallen message for another session: notify leader' })

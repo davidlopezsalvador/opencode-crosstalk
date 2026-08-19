@@ -24,13 +24,17 @@ function Fake-Send { param([string]$d, [string]$t) $script:Sent = @{ dest = $d; 
 $config = Get-Content (Join-Path $PSScriptRoot '..\cross.config.json') -Raw | ConvertFrom-Json
 $mySession = [string]$config.my_session_id
 $myModel = [string]$config.my_model
+if (-not $mySession) { $mySession = 'leader' }
 
 Write-Host "== T-ack: ACK 4 segments (model auto-derived from config) =="
 New-Fixture
 $r = Send-CrossAck -Token 'T1' -ForMsgId 'msg_x' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
 Assert-True ($r.ok) 'ack ok' $r.err
-Assert-True ($r.segments -eq 4) '4 segments (ACK:token:id:model auto-derived)' $r.segments
-Assert-True ($r.ack_text -eq "ACK:T1:${mySession}:${myModel}") 'ACK text with config model' $r.ack_text
+$expectedSegs = 3
+$expectedText = "ACK:T1:${mySession}"
+if ($myModel) { $expectedSegs = 4; $expectedText += ":${myModel}" }
+Assert-True ($r.segments -eq $expectedSegs) "$expectedSegs segments (ACK:token:id[:model] auto-derived)" $r.segments
+Assert-True ($r.ack_text -eq $expectedText) 'ACK text with config model' $r.ack_text
 Assert-True ($script:Sent.dest -eq 'ses_Y') 'send destination' $script:Sent.dest
 
 Write-Host "== T-ack: ACK 4 segments (with model) =="

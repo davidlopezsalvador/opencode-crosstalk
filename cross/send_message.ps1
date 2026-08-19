@@ -43,7 +43,7 @@ Import-Module (Join-Path $MyRoot 'modules\cross-state.psm1') -Force -DisableName
 $config = Get-CrossConfig
 
 $emisor = [string]$config.my_session_id
-if (-not $emisor) { $emisor = 'lider' }
+if (-not $emisor) { $emisor = 'leader' }
 $msgId = "msg_${emisor}_$(Get-Date -Format 'yyyyMMdd-HHmmss')-" + (Get-Random -Maximum 16777215).ToString('X6')
 $token = 'MSG-' + [System.Guid]::NewGuid().ToString('N').Substring(0, 12)
 $runId = 'RUN-' + [System.Guid]::NewGuid().ToString('N').Substring(0, 8)

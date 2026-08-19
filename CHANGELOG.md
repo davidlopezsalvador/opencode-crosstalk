@@ -9,6 +9,35 @@ mixed current specification with changelog and PowerShell pitfalls).
 
 ## Versions
 
+### v1.8.2 (2026-08-19) — close the 31 pre-existing test failures (pre-publication)
+
+GLM's second review confirmed all v1.8 bugs closed and recommended fixing
+the 31 pre-existing test failures before publishing (they existed before
+v1.8.1, verified via stash). Three causes, all resolved:
+
+- **(a) publish template has empty identity** (`my_session_id`/`my_model`/
+  `leader_session_id` are blank in `cross.config.json`). Tests now adapt
+  dynamically (expected sender `leader` fallback, model optional) or SKIP
+  with a clear message instead of asserting against a hardcoded
+  `ses_LEADER`/`model-b`. The code fallback to `leader` is unchanged
+  (it is correct). Affected: T-ack (5), T-nack (5), T-aviso-spof (1),
+  T-escalate (1).
+- **(b) module messages still in Spanish.** All user-visible messages
+  (`detail`/`throw`/`hint`/prompt text) translated to English across
+  `cross-action.psm1`, `cross-state.psm1`, `cross-diagnostic.psm1`,
+  `cross-transport.psm1`, `cross-delivery.psm1` and `cross/send_message.ps1`
+  (fallback `leader`). The DLQ writer already emitted the English format
+  (`to=`/`from=`/`retries=`) but the parser read the old Spanish one
+  (`para=`/`de=`/`reintentos=`); parser, section 12.7 doc and T-dlq/T-status
+  now align. Internal API field names (`razon`, `emisor`) and data-format
+  states (`ENVIADO`, `ESCRITO`) are unchanged.
+- **(c) tests requiring a live OpenCode server.** T-e2e and the
+  T-transport regex scenario now SKIP cleanly when no server/identity is
+  present instead of throwing/failing. T-transport fixture also fixed
+  (unstable `LastWriteTime` sort). Affected: T-e2e (7), T-transport (1).
+
+Suite result: **509 pass, 0 fail, 4 skip** (was 493 pass / 31 fail).
+
 ### v1.8.1 (2026-08-19) — GLM review fixes (pre-publication)
 
 External review by GLM of the v1.8 package found 4 bugs and 3 minor

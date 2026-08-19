@@ -7,7 +7,7 @@ $script:EnvFile = Join-Path $env:USERPROFILE '.config\opencode\.env'
 function Import-CrossConfig {
     param([string]$ConfigPath = '')
     if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
-        throw 'CURL_NOT_FOUND: curl.exe no encontrado en PATH (requerido para la API de OpenCode)'
+        throw 'CURL_NOT_FOUND: curl.exe not found in PATH (required for the OpenCode API)'
     }
     if (-not $ConfigPath) { $ConfigPath = Join-Path $PSScriptRoot '..\cross.config.json' }
     $configPath = [System.IO.Path]::GetFullPath($ConfigPath)
@@ -163,7 +163,7 @@ function Resolve-CrossEndpoint {
     if (-not $Password) {
         $pwObj = Get-CrossPassword
         if (-not $pwObj) {
-            return @{ ok = $false; code = 3; err = 'AUTH_FAILED'; detail = 'OPENCODE_SERVER_PASSWORD no definida (ni env ni .env)'; hint = 'definir env var o ponerla en .env' }
+            return @{ ok = $false; code = 3; err = 'AUTH_FAILED'; detail = 'OPENCODE_SERVER_PASSWORD not defined (neither env nor .env)'; hint = 'set the env var or add it to .env' }
         }
         $Password = $pwObj.value
         $passwordSource = $pwObj.source

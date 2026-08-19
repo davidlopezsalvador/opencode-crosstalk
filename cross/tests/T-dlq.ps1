@@ -32,14 +32,14 @@ New-Fixture
 $r = Write-CrossDlq -MsgId 'msg_d' -To 'ses_X' -Retries '3' -Flag 'HUMAN_REVIEW' -Summary 'agent not responding' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
 Assert-True ($r.ok) 'dlq ok' $r.err
 Assert-True ($r.written) 'written' $r.written
-Assert-True ($r.line -match '^\[.*\] DLQ \| msg_d \| para=ses_X \| de=ses_LEADER \| reintentos=3 \| ESTADO=UNREAD \| flag=HUMAN_REVIEW') 'canonical format' $r.line
+Assert-True ($r.line -match '^\[.*\] DLQ \| msg_d \| to=ses_X \| from=leader \| retries=3 \| STATUS=UNREAD \| flag=HUMAN_REVIEW') 'canonical format' $r.line
 Assert-True ($r.line -match "'agent not responding'") 'summary in quotes' $r.line
 
 Write-Host "== T-dlq: persisted in dlq-messages.md =="
 New-Fixture
 $r = Write-CrossDlq -MsgId 'msg_d' -To 'ses_X' -Retries '3' -Flag 'HUMAN_REVIEW' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
 $content = Get-Content -LiteralPath $script:DlqFile -Raw
-Assert-True ($content -match 'DLQ \| msg_d \| para=ses_X') 'DLQ in file' $content
+Assert-True ($content -match 'DLQ \| msg_d \| to=ses_X') 'DLQ in file' $content
 
 Write-Host "== T-dlq: marks outbox ESTADO=DLQ =="
 New-Fixture
@@ -51,7 +51,7 @@ Assert-True ($entry.estado -eq 'DLQ') 'ESTADO=DLQ persisted' $entry.estado
 Write-Host "== T-dlq: default dest from outbox =="
 New-Fixture
 $r = Write-CrossDlq -MsgId 'msg_d' -Retries '3' -Flag 'HUMAN_REVIEW' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
-Assert-True ($r.line -match 'para=ses_X') 'dest taken from outbox' $r.line
+Assert-True ($r.line -match 'to=ses_X') 'dest taken from outbox' $r.line
 
 Write-Host "== T-dlq: non-closed flag -> DLQ_FLAG_INVALID =="
 New-Fixture
@@ -73,7 +73,7 @@ Assert-True (-not $r.ok -and $r.err -eq 'USAGE_ERROR') 'no --msg-id -> USAGE_ERR
 Write-Host "== T-dlq: retries auto-derived from attempt (BUG Z) =="
 New-Fixture
 $r = Write-CrossDlq -MsgId 'msg_d' -Flag 'HUMAN_REVIEW' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
-Assert-True ($r.line -match 'reintentos=2') 'attempt=3 -> reintentos=2 (max(0,attempt-1))' $r.line
+Assert-True ($r.line -match 'retries=2') 'attempt=3 -> retries=2 (max(0,attempt-1))' $r.line
 New-Fixture
 $content2 = "# OUTBOX
 ## Activo
@@ -81,7 +81,7 @@ $content2 = "# OUTBOX
 "
 [System.IO.File]::WriteAllText($script:OutboxFile, $content2, (New-Object System.Text.UTF8Encoding($false)))
 $r = Write-CrossDlq -MsgId 'msg_d' -Flag 'HUMAN_REVIEW' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
-Assert-True ($r.line -match 'reintentos=0') 'attempt=1 -> reintentos=0' $r.line
+Assert-True ($r.line -match 'retries=0') 'attempt=1 -> retries=0' $r.line
 
 Write-Host "== T-dlq: audit DLQ =="
 New-Fixture

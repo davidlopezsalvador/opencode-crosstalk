@@ -82,7 +82,7 @@ msg_tval_ok | 2026-08-12 00:00:00 | M | PROCESADO
 New-Fixture $badIdem $goodOutbox
 $r = Run-Validate
 Assert-True ($r.ok -and $r.error_count -eq 0) 'ok with warning' $r.err
-Assert-True ($r.warnings -match 'linea no v1.6.1') 'warn non-v1.6.1 line' ($r.warnings -join '; ')
+Assert-True ($r.warnings -match 'line not v1.6.1') 'warn non-v1.6.1 line' ($r.warnings -join '; ')
 
 Write-Host "== T-validate (F7): historical mixed format outside Activo generates no errors =="
 $f7Idem = "# IDEMPOTENCIA
@@ -112,7 +112,7 @@ line without pipe not v1.6
 New-Fixture $goodIdem $malOutbox
 $r = Run-Validate
 Assert-True ($r.ok -and $r.error_count -eq 0) 'ok with malformed outbox' $r.err
-Assert-True ($r.warnings -match 'outbox no v1.6') 'warn malformed outbox' ($r.warnings -join '; ')
+Assert-True ($r.warnings -match 'outbox line not v1.6') 'warn malformed outbox' ($r.warnings -join '; ')
 
 Write-Host "== T-validate: non-v1.6.1 state in idempotencia Activo = warning =="
 $badStateIdem = "# IDEMPOTENCIA
@@ -123,7 +123,7 @@ msg_tval_ok | 2026-08-12 00:00:00 | M | PROCESADO
 New-Fixture $badStateIdem $goodOutbox
 $r = Run-Validate
 Assert-True ($r.ok -and $r.error_count -eq 0) 'ok with non-v1.6.1 state' $r.err
-Assert-True ($r.warnings -match 'estado no v1.6.1') 'warn non-v1.6.1 state' ($r.warnings -join '; ')
+Assert-True ($r.warnings -match 'state not v1.6.1') 'warn non-v1.6.1 state' ($r.warnings -join '; ')
 
 Write-Host ""
 Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)

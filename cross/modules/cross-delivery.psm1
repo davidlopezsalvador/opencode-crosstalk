@@ -337,7 +337,7 @@ function New-CrossDelivery {
             }
             if ($ack -and $ack.type -eq 'nack') {
                 [void](Set-OutboxEstado -MsgId $MsgId -Estado 'NACKED' -Path $OutboxPath)
-                return @{ ok = $false; err = 'NACK'; reason = $ack.reason; reason_code = $ack.reason; detail = "destino respondio NACK ($($ack.reason))"; state = 'NACKED'; attempt = $attempt; nack_msg_id = $ack.msg_id; nack_run_id = $ack.run_id }
+                return @{ ok = $false; err = 'NACK'; reason = $ack.reason; reason_code = $ack.reason; detail = "destination responded NACK ($($ack.reason))"; state = 'NACKED'; attempt = $attempt; nack_msg_id = $ack.msg_id; nack_run_id = $ack.run_id }
             }
             $growing = Get-DestGrowing
             if ($growing -and -not $renewed) {
@@ -351,7 +351,7 @@ function New-CrossDelivery {
         if ($attempt -lt $MaxAttempts) { continue }
         [void](Set-OutboxEstado -MsgId $MsgId -Estado 'EXPIRADO' -Path $OutboxPath)
         $growText = if ($growing) { 'creciendo' } else { 'quieto' }
-        return @{ ok = $false; err = 'ACK_TIMEOUT'; reason_code = 'NACK_TIMEOUT'; detail = "sin ACK tras $($AckTimeoutSec)s (intento $attempt/$MaxAttempts, destino $growText)"; state = 'EXPIRADO'; attempt = $attempt; session_growing = $growing }
+        return @{ ok = $false; err = 'ACK_TIMEOUT'; reason_code = 'NACK_TIMEOUT'; detail = "no ACK after $($AckTimeoutSec)s (attempt $attempt/$MaxAttempts, destination $growText)"; state = 'EXPIRADO'; attempt = $attempt; session_growing = $growing }
     }
     return @{ ok = $false; err = 'DELIVERY_ABORTED'; state = 'EN_VUELO' }
 }

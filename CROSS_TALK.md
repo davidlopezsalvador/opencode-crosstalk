@@ -3,7 +3,13 @@
 Reference document so that any agent in this project can communicate
 with other open chats/sessions in the same project.
 
-> **Current version: v1.8.1 (2026-08-19).** v1.8.1 closes the 4 bugs found
+> **Current version: v1.8.2 (2026-08-19).** v1.8.2 closes the 31
+> pre-existing test failures GLM's second review flagged before publication:
+> tests now adapt to the publish template's empty identity or SKIP with a
+> clear message (cause a), all module messages are translated to English
+> including the DLQ format (`to=`/`from=`/`retries=`, cause b), and
+> server-dependent tests SKIP cleanly when no live server/identity is present
+> (cause c). v1.8.1 closes the 4 bugs found
 > by the GLM external review (pre-publication): restores
 > `cross/send_message.ps1` (BUG EE), aligns §4e with the real architecture
 > (BUG FF), renumbers the duplicate section 3 to 2 (BUG GG) and makes
@@ -1428,7 +1434,7 @@ is already awake by other means. Application-level "magic packet"
 After exhausting escalation, the message is written to `whiteboard/dlq-messages.md`
 (append-only, visible to all sessions and to the human):
 
-    [date] DLQ | msg_id | para=ses_X | de=ses_Y | retries=3 |
+    [date] DLQ | msg_id | to=ses_X | from=ses_Y | retries=3 |
     ESTADO=UNREAD | flag=HUMAN_REVIEW | "summary"
 
 The `flag` field is **closed** (parseable, v1.6.1 external-reviewer F2 correction):

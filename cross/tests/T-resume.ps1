@@ -34,7 +34,7 @@ $script:OutboxBefore = Get-Content -LiteralPath $script:OutboxFile -Raw
 $r = Send-CrossResume -To 'ses_X' -TaskId 'msg_tx' -From 'diario/15_charla.md:3' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
 Assert-True ($r.ok) 'resume ok' $r.err
 Assert-True ($r.new_msg_id -eq $false) 'does NOT create new msg_id' $r.new_msg_id
-Assert-True ($r.prompt -match 'Continúa desde "diario/15_charla.md:3"') 'prompt continues from checkpoint' $r.prompt
+Assert-True ($r.prompt -match 'Continue from "diario/15_charla.md:3"') 'prompt continues from checkpoint' $r.prompt
 Assert-True ($r.prompt -match 'msg_tx') 'prompt mentions the task' $r.prompt
 Assert-True ($script:Sent.dest -eq 'ses_X') 'send destination' $script:Sent.dest
 
@@ -64,7 +64,7 @@ $r = Send-CrossResume -To 'ses_X' -TaskId 'msg_tx' -AuditPath $script:AuditFile 
 $audit = Get-Content -LiteralPath $script:AuditFile -Raw
 Assert-True ($audit -match '\| RESUME \| ENVIADO \|') 'audit type RESUME / SENT' $audit
 Assert-True ($audit -match 'msg=msg_tx') 'audit with task_id' $audit
-Assert-True ($audit -match 'NO nuevo msg_id') 'audit note no new msg_id' $audit
+Assert-True ($audit -match 'NO new msg_id') 'audit note no new msg_id' $audit
 
 Write-Host ""
 Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)

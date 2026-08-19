@@ -16,11 +16,29 @@ $config = Get-Content (Join-Path $PSScriptRoot '..\cross.config.json') -Raw | Co
 $mySession = [string]$config.my_session_id
 $myModel = [string]$config.my_model
 
+if (-not $mySession) {
+    Write-Host "  SKIP  T-e2e: config template has empty my_session_id (publish template); real transport needs a real session"
+    Write-Host ""
+    Write-Host ("RESULT: {0} pass, {1} fail" -f 0, 0)
+    exit 0
+}
+
 $logDir = "$env:APPDATA\ai.opencode.desktop\logs"
+if (-not (Test-Path $logDir) -or -not (Get-ChildItem $logDir -ErrorAction SilentlyContinue)) {
+    Write-Host "  SKIP  T-e2e: no OpenCode Desktop server logs in this environment (publish template)"
+    Write-Host ""
+    Write-Host ("RESULT: {0} pass, {1} fail" -f 0, 0)
+    exit 0
+}
 $latestLog = Get-ChildItem $logDir | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 $port = ([regex]::Match((Get-Content "$($latestLog.FullName)\main.log" -Raw), "server ready.*url: 'http://127\.0\.0\.1:(\d+)'")).Groups[1].Value
 $password = $env:OPENCODE_SERVER_PASSWORD
-if (-not $port -or -not $password) { throw 'Could not detect server credentials' }
+if (-not $port -or -not $password) {
+    Write-Host "  SKIP  T-e2e: server credentials not detectable in this environment (publish template)"
+    Write-Host ""
+    Write-Host ("RESULT: {0} pass, {1} fail" -f 0, 0)
+    exit 0
+}
 
 function Invoke-CrossPost {
     param([string]$Dest, [string]$Text)

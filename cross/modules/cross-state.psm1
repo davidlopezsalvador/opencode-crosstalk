@@ -97,7 +97,7 @@ function New-CrossClaim {
             if ($claimedBy -eq $Owner) { return @{ ok = $true; already = $true; detail = "ya reclamado por $Owner" } }
             return @{ ok = $false; err = 'ALREADY_CLAIMED_BY_OTHER'; detail = "msg_id $MsgId ya reclamado por $claimedBy" }
         }
-        if ($last.state -eq 'PROCESADO') { return @{ ok = $true; already = $true; detail = 'ya procesado' } }
+        if ($last.state -eq 'PROCESADO') { return @{ ok = $true; already = $true; detail = 'already processed' } }
     }
     $ts = Get-StateTimestamp
     [void](Add-IdempotenciaLine -MsgId $MsgId -Timestamp $ts -Modelo $Modelo -State "CLAIMED_BY=$Owner" -Path $Path)
@@ -115,9 +115,9 @@ function New-CrossRelease {
     if (-not $Path) { $Path = Get-IdempotenciaPath }
     if (-not $Owner) { return @{ ok = $false; err = 'NO_OWNER'; detail = '--owner o config.my_session_id requerido' } }
     $last = Get-MsgState -MsgId $MsgId -Path $Path
-    if ($null -eq $last) { return @{ ok = $false; err = 'NOT_CLAIMED'; detail = "no hay claim previo para $MsgId" } }
+    if ($null -eq $last) { return @{ ok = $false; err = 'NOT_CLAIMED'; detail = "no prior claim for $MsgId" } }
     if ($last.state -match '^SUPERSEDED_BY=') { return @{ ok = $true; already = $true; detail = 'ya liberado' } }
-    if ($last.state -eq 'PROCESADO') { return @{ ok = $false; err = 'ALREADY_PROCESSED'; detail = "msg_id $MsgId ya esta PROCESADO, no se puede liberar" } }
+    if ($last.state -eq 'PROCESADO') { return @{ ok = $false; err = 'ALREADY_PROCESSED'; detail = "msg_id $MsgId is already PROCESADO, cannot be released" } }
     if ($last.state -match '^CLAIMED_BY=(.+)$') {
         $claimedBy = $Matches[1]
         if (-not $Force -and $claimedBy -ne $Owner) {
@@ -139,14 +139,14 @@ function New-CrossDone {
     if (-not $Path) { $Path = Get-IdempotenciaPath }
     if (-not $Owner) { return @{ ok = $false; err = 'NO_OWNER'; detail = '--owner o config.my_session_id requerido' } }
     $last = Get-MsgState -MsgId $MsgId -Path $Path
-    if ($null -eq $last) { return @{ ok = $false; err = 'NOT_CLAIMED'; detail = "no hay claim previo para $MsgId" } }
-    if ($last.state -eq 'PROCESADO') { return @{ ok = $true; already = $true; detail = 'ya procesado' } }
+    if ($null -eq $last) { return @{ ok = $false; err = 'NOT_CLAIMED'; detail = "no prior claim for $MsgId" } }
+    if ($last.state -eq 'PROCESADO') { return @{ ok = $true; already = $true; detail = 'already processed' } }
     if ($last.state -match '^SUPERSEDED_BY=') {
-        return @{ ok = $false; err = 'RELEASED_CANNOT_DONE'; detail = "msg_id $MsgId fue liberado (SUPERSEDED_BY), no puede marcarse PROCESADO" }
+        return @{ ok = $false; err = 'RELEASED_CANNOT_DONE'; detail = "msg_id $MsgId was released (SUPERSEDED_BY), cannot be marked PROCESADO" }
     }
     if ($last.state -match '^CLAIMED_BY=(.+)$') {
         $claimedBy = $Matches[1]
-        if ($claimedBy -ne $Owner) { return @{ ok = $false; err = 'NOT_OWNER'; detail = "reclamado por $claimedBy, no por $Owner" } }
+        if ($claimedBy -ne $Owner) { return @{ ok = $false; err = 'NOT_OWNER'; detail = "claimed by $claimedBy, not by $Owner" } }
     }
     $ts = Get-StateTimestamp
     [void](Add-IdempotenciaLine -MsgId $MsgId -Timestamp $ts -Modelo $Modelo -State 'PROCESADO' -Path $Path)
@@ -248,11 +248,11 @@ function Test-CrossConsistency {
             if ($section -notmatch 'Activo') { continue }
         $m = [regex]::Match($trimmed, '^(.+?) \| (.+?) \| ([^|]*) \| (.+?)$')
             if (-not $m.Success) {
-                [void]$warnings.Add("linea no v1.6.1 en seccion Activo: $trimmed")
+                [void]$warnings.Add("line not v1.6.1 in Active section: $trimmed")
             } else {
                 $state = $m.Groups[4].Value
                 if ($state -notmatch '^(CLAIMED_BY=|PROCESADO$|SUPERSEDED_BY=)') {
-                    [void]$warnings.Add("estado no v1.6.1 en seccion Activo: $state")
+                    [void]$warnings.Add("state not v1.6.1 in Active section: $state")
                 }
             }
         }
@@ -260,7 +260,7 @@ function Test-CrossConsistency {
 
     $outboxEntries = @(Read-OutboxLog -Path $OutboxPath)
     foreach ($e in $outboxEntries) {
-        if ($e.malformed) { [void]$warnings.Add("linea outbox no v1.6 en Activo: $($e.raw)") }
+        if ($e.malformed) { [void]$warnings.Add("outbox line not v1.6 in Active: $($e.raw)") }
         if ($e.lease -and $e.lease -notmatch '\d{4}-\d{2}-\d{2}T\d{2}:\d{2}') {
             [void]$warnings.Add("lease sin deadline UTC en outbox (msg $($e.msg_id)): $($e.lease)")
         }
@@ -424,7 +424,7 @@ function Update-OutboxLine {
         }
         if (($i + 1) -lt $MaxRetries) { Start-Sleep -Milliseconds $BackoffMs[$i] }
     }
-    return @{ ok = $false; err = 'OUTBOX_LOCKED'; detail = 'no se pudo actualizar la linea tras reintentos (backoff 200/400/800ms)' }
+    return @{ ok = $false; err = 'OUTBOX_LOCKED'; detail = 'could not update the line after retries (backoff 200/400/800ms)' }
 }
 
 function Add-OutboxEntry {
@@ -486,7 +486,7 @@ function Add-OutboxEntry {
         }
         if (($i + 1) -lt $MaxRetries) { Start-Sleep -Milliseconds $BackoffMs[$i] }
     }
-    return @{ ok = $false; err = 'OUTBOX_LOCKED'; detail = 'no se pudo insertar la linea tras reintentos (backoff 100..1200ms)' }
+    return @{ ok = $false; err = 'OUTBOX_LOCKED'; detail = 'could not insert the line after retries (backoff 100..1200ms)' }
 }
 
 function Add-CrossLogLine {
@@ -508,7 +508,7 @@ function Add-CrossLogLine {
             return @{ ok = $false; err = 'LOG_WRITE_ERROR'; detail = $_.Exception.Message }
         }
     }
-    return @{ ok = $false; err = 'LOG_LOCKED'; detail = 'no se pudo anexar la linea tras reintentos (backoff 200/400/800ms)' }
+    return @{ ok = $false; err = 'LOG_LOCKED'; detail = 'could not append the line after retries (backoff 200/400/800ms)' }
 }
 
 function Write-AuditEntry {

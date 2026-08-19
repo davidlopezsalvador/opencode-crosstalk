@@ -24,7 +24,7 @@ Write-Host "== T-nudge: firm prompt with token =="
 New-Fixture
 $r = Send-CrossNudge -To 'ses_X' -Task 'deliver report msg_1' -Token 'T1' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
 Assert-True ($r.ok) 'nudge ok' $r.err
-Assert-True ($r.prompt -match 'IGNORA|ignora') 'firm prompt' $r.prompt
+Assert-True ($r.prompt -match 'IGNORE|ignore') 'firm prompt' $r.prompt
 Assert-True ($r.prompt -match "Continue") 'mentions Continue' $r.prompt
 Assert-True ($r.prompt -match 'deliver report msg_1') 'task present' $r.prompt
 Assert-True ($r.prompt -match 'token: T1') 'token present' $r.prompt
