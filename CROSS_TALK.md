@@ -3,7 +3,33 @@
 Reference document so that any agent in this project can communicate
 with other open chats/sessions in the same project.
 
-> **Current version: v1.6.1 (2026-08-11).** Semantic corrections after
+> **Current version: v1.8 (2026-08-19).** v1.8 adds two **low-cost
+> operational improvements** (leader decision based on the REVISION-89
+> advisor review of nemotron's report after its failed experiment as leader,
+> plus the ESTADO-88 availability query, 3/3 verified via API):
+> (1) the **heartbeat `ESTADO:` convention** (§10.3): advisors publish their
+> availability periodically so the leader can build a live dashboard without
+> nudging them; (2) the **`Send-CrossMessage.ps1` enhanced wrapper** (§4e.2):
+> auto-detection, retry with exponential backoff and optional delivery
+> verification by polling the destination history. Both are optional
+> utilities — the manual method (4a-4c) and the existing wrapper (4e) remain
+> valid. v1.7.1 adds the **pre-built JSON
+> fallback** after the second E2E test (TEST-E2E-86, 4/4 confirmed again):
+> for models that STILL fail with the ready-to-copy script
+> (openrouter/free copies the script's source line as payload text instead of
+> executing it, producing literal backticks/`$(...)` in the message), the
+> leader leaves the JSON payload ALREADY BUILT in a shared temp path
+> (`$env:TEMP`, ASCII no BOM, no interpolation) and the advisor only runs a
+> single `curl --data-binary "@archivo"` line. Verified: works in 1 nudge.
+> v1.7 adds the **ready-to-copy script**
+> rule after the E2E protocol test (TEST-E2E-85, 4/4 advisors confirmed):
+> the leader's task message MUST include the full send script (or the
+> `send_message.ps1` wrapper invocation) ready to copy/execute, because
+> some models (openrouter/free, nemotron-3-ultra-free) cannot build the
+> command themselves (they break PowerShell syntax or only reply in their
+> own chat). It also consolidates the E2E-tested delivery loop: send →
+> ACK-PROTOCOLO → signed reply via API → leader verifies token in its
+> history. v1.6.1 made semantic corrections after
 > external review (external-reviewer + 4 advisors + external-reviewer) of the anti-sleep
 > protocol v1.6 (section 12): about standard message with `msg_id`, durable outbox,
 > ACK at turn boundary (decision window 120s, no backoff), passive
@@ -18,7 +44,7 @@ with other open chats/sessions in the same project.
 > Golden rule: ALWAYS `prompt_async` without `noReply` to wake up (5.1, 12).
 >
 > Version history and discoveries are in **`CHANGELOG.md`**
-> (v1.1 → v1.6.1), Windows pitfalls in **`CROSS_WINDOWS.md`**. This
+> (v1.1 → v1.8), Windows pitfalls in **`CROSS_WINDOWS.md`**. This
 > file contains ONLY the current rules.
 
 ## Context
@@ -195,16 +221,20 @@ Your reply token will be: MEJORA-R1:<DEST_ID>:<DEST_MODEL>
 (example: MEJORA-R1:ses_abc123:model-b).
 The leader sending you this message is:
 ID: <LEADER_ID> | model: <LEADER_MODEL>.
-ALWAYS reply to that origin session.
-PROTOCOL: CROSS-TALK v1.6.1 — reply ACK-PROTOCOLO:1.6.1 if you understand
+ALWAYS reply to that origin session via API (prompt_async WITHOUT noReply):
+NEVER write the reply only in your own chat (the leader will not see it).
+VERIFY delivery: after sending, read the leader's history
+(GET /session/<LEADER_ID>/message) and confirm your token is there.
+PROTOCOL: CROSS-TALK v1.8 — reply ACK-PROTOCOLO:1.8 if you understand
 ]
 ```
 
-**Protocol version handshake (v1.6.1, external-reviewer correction 2026-08-11):** the
-task message includes the line `PROTOCOLO: CROSS-TALK v1.6.1`. The advisor
-must reply `ACK-PROTOCOLO:1.6.1` (EXACTLY three segments: no `v`, no
+**Protocol version handshake (v1.8, REVISION-89 consolidation 2026-08-19;**
+**originally v1.6.1 external-reviewer correction 2026-08-11):** the
+task message includes the line `PROTOCOLO: CROSS-TALK v1.8`. The advisor
+must reply `ACK-PROTOCOLO:1.8` (EXACTLY three segments: no `v`, no
 prefix) within the first 30 s, along with its first ACK if applicable. Rules:
-- If the advisor replies `ACK-PROTOLO:1.6.1` → compatible version.
+- If the advisor replies `ACK-PROTOLO:1.8` → compatible version.
 - If it replies `ACK-PROTOCOLO:<other_version>` → incompatibility: the leader sends
   it the **canonical critical rules block (§4f)** and clarifies the
   version difference before proceeding.
@@ -217,6 +247,83 @@ prefix) within the first 30 s, along with its first ACK if applicable. Rules:
 
 Each member receives an individualized message with ITS OWN ID and model.
 This way no one guesses or copies other people's IDs.
+
+> **RULE (delivery claim, correction 2026-08-18):** the leader's task message
+> ALWAYS includes the explicit claim of the correct reply method (the lines
+> above: reply via API to the leader's session, WITHOUT noReply, and verify
+> delivery). The advisor, upon finishing, MUST ask itself whether the way it
+> is sending the reply is the correct one (API to the origin session, NOT its
+> own chat) and MUST VERIFY that the leader received it: read the leader's
+> history (section 6) searching for its token, or check the log / audit_log.
+> If it cannot confirm arrival, it must NOT assume it arrived: resend via API
+> or notify the leader in its own chat (6.1e).
+
+> **RULE (ready-to-copy script, v1.7, tested E2E 2026-08-18 TEST-E2E-85):**
+> the leader's task message MUST ALSO include the complete send script,
+> ready to copy into the advisor's bash tool and execute WITHOUT EDITING.
+> Real E2E results: 2/4 advisors (big-pickle, mimo) reply via API without
+> help; openrouter/free breaks the PowerShell command syntax (parser
+> errors) and nemotron-3-ultra-free only writes in its own chat, it never
+> sends via API — BOTH resolved only after the leader sent the script
+> verbatim (took 2 and 4 rounds respectively). Therefore, the task message
+> includes at least:
+>
+> 1. The identity block of §4d (IDs, model, leader, signature).
+> 2. The instruction "USE YOUR BASH TOOL. Copy and run EXACTLY this script"
+>    followed by the full script (see below), with the advisor's reply text
+>    already embedded and signed.
+> 3. The verification instruction (`GET /session/<LEADER_ID>/message`,
+>    search for the token) as a final step.
+>
+> Reference script (auto-detects credentials, ASCII no BOM, prompt_async):
+>
+> ```powershell
+> $logDir = "$env:APPDATA\ai.opencode.desktop\logs"
+> $latestLog = Get-ChildItem $logDir | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+> $content = Get-Content "$($latestLog.FullName)\main.log" -Raw
+> $port = ([regex]::Match($content, "server ready.*url: 'http://127\.0\.0\.1:(\d+)'")).Groups[1].Value
+> $password = $env:OPENCODE_SERVER_PASSWORD
+> $text = "TOKEN:ses_XXXXXXX:modelo. <respuesta completa>"
+> $payload = @{ parts = @(@{ type = "text"; text = $text }) }
+> $tmp = "$env:TEMP\cross_send.json"
+> [System.IO.File]::WriteAllText($tmp, ($payload | ConvertTo-Json -Depth 3), (New-Object System.Text.UTF8Encoding($false)))
+> curl.exe -s -X POST -u "opencode:$password" -H "Content-Type: application/json" --data-binary "@$tmp" "http://127.0.0.1:$port/session/ses_LEADER/prompt_async"
+> Remove-Item $tmp -ErrorAction SilentlyContinue
+> ```
+>
+> The leader replaces `TOKEN`, `ses_XXXXXXX`, `modelo`, the reply text and
+> `ses_LEADER` before sending. If the advisor still fails, the leader
+> diagnoses via 6.1a and nudges again with the script (6.1c).
+
+> **RULE (pre-built JSON fallback, v1.7.1, tested E2E 2026-08-19
+> TEST-E2E-86):** if the advisor STILL fails with the ready-to-copy script
+> (openrouter/free case: it copies the script's SOURCE LINE
+> `$text = "..."` as the payload text instead of executing it, so the
+> message arrives with literal `` `n `` and `$(Get-Date ...)` unexpanded;
+> it also rebuilds the text by hand, introducing typos like
+> `ACK-PROTOCOLO / 1.7`), the leader switches to the **pre-built JSON**
+> method: the leader writes the complete payload file itself (ASCII, no
+> BOM, NO interpolation, already signed) in a shared path
+> (`$env:TEMP\opencode\e2e86_listo.json` style) and sends the advisor ONLY
+> the credential-detection lines plus a single `curl` line with
+> `--data-binary "@<path>"`. The advisor has nothing to build: no
+> JSON construction, no file writing, no interpolation. Verified: works in
+> 1 nudge on openrouter/free. This is the LAST fallback before declaring
+> the advisor incapable of API delivery (6.1e/NACK).
+>
+> **Concrete example (leader side, after writing the payload to a shared path):**
+>
+> ```powershell
+> $payload = @{ parts = @(@{ type = "text"; text = "TAREA-R1:ses_abc:model-b  PROTOCOLO: CROSS-TALK v1.8 — reply ACK-PROTOCOLO:1.8" }) }
+> $tmp = "$env:TEMP\opencode\e2e86_listo.json"
+> [System.IO.File]::WriteAllText($tmp, ($payload | ConvertTo-Json -Depth 3), (New-Object System.Text.UTF8Encoding($false)))
+> ```
+>
+> ```powershell
+> # What the advisor must copy and run (ONLY these two lines, nothing to build):
+> $Puerto = ([regex]::Match((Get-Content "$env:APPDATA\ai.opencode.desktop\logs\*\main.log" -Raw), "server ready.*url: 'http://127\.0\.0\.1:(\d+)'")).Groups[1].Value
+> curl.exe -s -m 30 -X POST -u "opencode:$env:OPENCODE_SERVER_PASSWORD" -H "Content-Type: application/json" --data-binary "@C:\Users\unknown\AppData\Local\Temp\opencode\e2e86_listo.json" "http://127.0.0.1:$Puerto/session/ses_LEADER/prompt_async"
+> ```
 
 > **The leader also identifies itself (v1.5, tested 2026-08-10):** the leader's message
 > must include its **own ID and model** in addition to the recipient's.
@@ -281,7 +388,7 @@ $json = $payload | ConvertTo-Json -Depth 4
 $file = Join-Path $env:TEMP "send_$(Get-Random).json"
 [System.IO.File]::WriteAllText($file, $json, [System.Text.Encoding]::ASCII)
 $endpoint = if ($NoReply) { "message" } else { "prompt_async" }
-curl.exe -s -X POST -u "opencode:$Password" -H "Content-Type: application/json" `
+curl.exe -s -m 30 -X POST -u "opencode:$Password" -H "Content-Type: application/json" `
   --data-binary "@$file" "http://127.0.0.1:$Puerto/session/$Destino/$endpoint"
 Remove-Item $file -ErrorAction SilentlyContinue
 ```
@@ -296,20 +403,109 @@ Notes:
 - No need to pass `-Puerto` or `-Password`: they are always auto-detected.
 - `-NoReply` delivers without the destination processing it (equivalent to 4a).
 - Without `-NoReply` it uses `prompt_async` (equivalent to 4c).
+- **Always set `-m 30` on curl** (without it, a slow server hangs the shell and
+  truncates delivery; verified v1.8, nemotron case: only 1 of 3 advisors received
+  the message because the shell hung after the first send).
 - The wrapper uses `[System.IO.File]::WriteAllText` with ASCII encoding and
   `ConvertTo-Json`: it avoids `-NoNewline`/encoding errors that cause HTTP 500.
 - If auto-detection fails (e.g. it cannot find the port) it throws an error instead of
   sending with obsolete credentials.
 
-### 4f. Minimal critical rules (fallback handshake, v1.6.1 O2 external-reviewer)
+### 4e.2. `Send-CrossMessage.ps1` enhanced wrapper (v1.8)
 
-When an advisor does not reply `ACK-PROTOCOLO:1.6.1` within 30 s (4d), the leader sends
+> **v1.8 (advisor consensus 2026-08-19, after nemotron's experiment as leader):**
+> enhanced wrapper that adds two capabilities the basic wrapper (4e) lacks:
+> **retry with exponential backoff** (a failed send is retried automatically
+> instead of leaving the agent to fire repeated commands manually, §11.6) and
+> **optional delivery verification** by polling the destination history for a
+> token (the root cause of nemotron's failures: HTTP 200 ≠ processed; the
+> message must be READ back from the destination history, §6).
+> It keeps the mandatory auto-detection (RULE v1.4) and the ASCII no-BOM
+> payload write (CROSS_WINDOWS.md #1). Optional utility: the manual method
+> (4a-4c) and the basic wrapper (4e) remain valid.
+
+```powershell
+param(
+  [Parameter(Mandatory=$true)][string]$Destino,
+  [Parameter(Mandatory=$true)][string]$Texto,
+  [string]$Token,                 # optional: token to verify in destination history
+  [switch]$NoReply,
+  [int]$Retries = 3,              # attempts with backoff (2s, 4s, 8s, ...)
+  [int]$VerifWait = 0             # seconds to poll for the token (0 = no verification)
+)
+
+# ALWAYS AUTO-DETECT (RULE v1.4): port changes on restart, password rotates.
+$logDir = "$env:APPDATA\ai.opencode.desktop\logs"
+$latestLog = Get-ChildItem $logDir | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$Puerto = ([regex]::Match((Get-Content "$($latestLog.FullName)\main.log" -Raw),
+  "server ready.*url: 'http://127\.0\.0\.1:(\d+)'")).Groups[1].Value
+if (-not $Puerto) { throw "Could not auto-detect server port" }
+$Password = $env:OPENCODE_SERVER_PASSWORD
+if (-not $Password) { throw "OPENCODE_SERVER_PASSWORD is not defined" }
+
+# ASCII payload, no BOM, no shell interpolation (CROSS_WINDOWS.md #1)
+$payload = @{ parts = @(@{ type = "text"; text = $Texto }) }
+if ($NoReply) { $payload.noReply = $true }
+$json = $payload | ConvertTo-Json -Depth 4
+$file = Join-Path $env:TEMP ("send_" + [guid]::NewGuid().ToString("N") + ".json")
+[System.IO.File]::WriteAllText($file, $json, [System.Text.Encoding]::ASCII)
+
+$endpoint = if ($NoReply) { "message" } else { "prompt_async" }
+$http = $null
+for ($i = 1; $i -le $Retries; $i++) {
+  $http = curl.exe -s -m 30 -w "%{http_code}" -o NUL -X POST -u "opencode:$Password" `
+    -H "Content-Type: application/json" --data-binary "@$file" `
+    "http://127.0.0.1:$Puerto/session/$Destino/$endpoint"
+  if ($http -match "^(200|204)$") { Write-Host "SEND OK (HTTP $http), attempt $i/$Retries"; break }
+  Write-Host "SEND FAILED (HTTP $http), attempt $i/$Retries; retrying in $([Math]::Min(2 -shl ($i-1), 30))s..."
+  Start-Sleep -Seconds ([Math]::Min(2 -shl ($i-1), 30))
+}
+
+# Optional delivery verification: HTTP 200/204 only means "accepted", not "processed" (nemotron case)
+if ($Token -and $http -match "^(200|204)$" -and $VerifWait -gt 0) {
+  $deadline = (Get-Date).AddSeconds($VerifWait)
+  do {
+    Start-Sleep -Seconds 2
+    $hist = curl.exe -s -m 15 -u "opencode:$Password" "http://127.0.0.1:$Puerto/session/$Destino/message?limit=10" | ConvertFrom-Json
+    $found = $hist | ForEach-Object { ($_.parts | Where-Object { $_.type -eq "text" } | ForEach-Object { $_.text }) -join "`n" } |
+             Where-Object { $_ -match [regex]::Escape($Token) }
+    if ($found) { Write-Host "VERIFIED: token '$Token' present in destination history"; break }
+  } while ((Get-Date) -lt $deadline)
+  if (-not $found) { Write-Host "NOT VERIFIED: token '$Token' not found in destination history after $VerifWait s" }
+}
+
+Remove-Item $file -ErrorAction SilentlyContinue
+```
+
+Usage:
+
+```powershell
+# Send with wake-up (prompt_async), 3 retries, verify delivery within 60 s
+& ".\whiteboard\Send-CrossMessage.ps1" -Destino "ses_AAAAAAAA" -Texto "TASK..." -Token "TAREA-R1" -VerifWait 60
+
+# Fire-and-forget notification (noReply=true), no verification
+& ".\whiteboard\Send-CrossMessage.ps1" -Destino "ses_AAAAAAAA" -Texto "STATUS OK" -NoReply
+```
+
+Notes:
+- `-Token` + `-VerifWait`: poll the DESTINATION history (section 6) — the
+  only proof of processing; a bare HTTP 200/204 is NOT proof (nemotron
+  case, §11.3). **`-VerifWait` only takes effect when `-Token` is ALSO
+  given** — the token is what the poller looks for in the destination
+  history; passing `-VerifWait` without `-Token` verifies nothing.
+- Retries use exponential backoff (2s, 4s, 8s, ... capped at 30s): no more
+  streaks of failed manual commands (§11.6).
+- Keep this file in `whiteboard/` next to `send_message.ps1` (4e).
+
+### 4f. Minimal critical rules (fallback handshake, v1.8)
+
+When an advisor does not reply `ACK-PROTOCOLO:1.8` within 30 s (4d), the leader sends
 it this **canonical block** to be copied verbatim, without editing or improvising. It is 8
 lines sufficient for any agent to operate without having read
 CROSS_TALK.md:
 
 ```
-PROTOCOLO CROSS-TALK v1.6.1 — CRITICAL RULES:
+PROTOCOLO CROSS-TALK v1.8 — CRITICAL RULES:
 1. Your ID and model are communicated by the leader (do not guess them).
 2. ALWAYS reply via API (prompt_async without noReply) to the leader's session.
 3. ACK first, then process: ACK:<token>:<your_ID>:<your_model>.
@@ -335,6 +531,10 @@ text and any agent can operate with the minimum.
 >    the chat without sending via API is only acceptable when there is no other way
 >    to send (external environment failure, the model does not have network
 >    tools, etc.) and ALWAYS notifying the leader in the chat that you could not send it.
+>    **v1.7 (TEST-E2E-85):** if the task message includes the ready-to-copy
+>    script (§4d rule), copy it into your bash tool and execute it verbatim —
+>    do not rebuild the command from memory (models that do this break the
+>    PowerShell syntax or send nothing).
 > 2. Identify the sender by its **session ID** (e.g. `ses_AAAAAAAA`)
 >    and the message will tell you the token to return (e.g. `ACUERDO-FINAL`).
 >    If the message **does not identify the sender** (ID + model), request confirmation
@@ -345,6 +545,13 @@ text and any agent can operate with the minimum.
 >    `BUGS-R1:YOUR_ID:YOUR_MODEL`), **and your result**, directed to the session that
 >    asked. Using a different token breaks traceability (v1.5, model-c contribution).
 > 4. Run the script in this section, do not "improvise" a loose text.
+5. **Verify delivery (mandatory, correction 2026-08-18):** once you have sent
+   your reply via API, ask yourself if the way you sent it is the correct one
+   and VERIFY that the leader received it: read the leader's history
+   (`GET /session/<ORIGIN_ID>/message`, section 6) searching for your token,
+   or check the log / `audit_log.md` (section 9). If you cannot confirm the
+   arrival, do not assume it: resend via API or notify in your own chat
+   (6.1e) that you could not send it.
 
 If a session (e.g. `ses_AAAAAAAA`) sends you a message, to
 **reply to that session** run the following. Include a unique token so
@@ -807,7 +1014,7 @@ the real path. Therefore:
 4. **CMake:** `C:\Program Files\CMake\bin\cmake.exe`.
 5. **GCC/G++ (MSYS2 UCRT64):** `C:\msys64\ucrt64\bin\g++.exe` / `gcc.exe`
    (real desktop build toolchain; see project AGENTS.md).
-6. **Send wrapper:** `whiteboard\send_message.ps1` (auto-detects credentials).
+6. **Send CLI:** `cross.ps1 send` or `cross.ps1 send --text "..." --dest ses_X` (auto-detects credentials; see §4d).
 
 > If the leader delivers a task that requires a tool, it must specify its
 > **full path** in the message (section 4d) and not assume the advisor will
@@ -895,6 +1102,64 @@ Updated per round, not in real time. Suggested format:
 > race conditions (multiple agents writing the same file) and because
 > `GET /session/:id` already covers presence without overhead.
 
+### 10.3. Heartbeat `ESTADO:` (v1.8, low-cost advisor availability)
+
+> **v1.8 (2026-08-19, after nemotron's experiment as leader and the
+> ESTADO-88 availability query, 3/3 verified via API):** convention for
+> advisors to report their availability WITHOUT being asked, so the leader
+> has a live dashboard and never wastes a round on a status check.
+
+**Format** (verified in ESTADO-88, 2026-08-19 — same as the task reply):
+
+```
+ESTADO:sesion:modelo|DISPONIBLE|capacidad=<descripcion>
+```
+
+Values for the state field: `DISPONIBLE` | `OCUPADO` | `DESCANSANDO`.
+
+**Rules:**
+
+1. **Each advisor publishes `ESTADO:` in its own session history**
+   (via its own reply, or a self-send with `-NoReply` — no need to wake
+   anyone) **every `HEARTBEAT_INTERVAL_MIN` (5) minutes** while it is
+   operative, or **immediately when its state changes** (e.g. goes OCUPADO
+   with a task).
+2. The leader builds the dashboard by polling each advisor session with
+   `GET /session/:id/message?limit=N` (section 6) and filtering lines
+   matching `^ESTADO:`; the LATEST line per session is the current state.
+   **Only the leader writes `whiteboard/estado_equipo.md`** (single writer,
+   rewritten on each change — the advisors publish `ESTADO:` in their own
+   history but never write the dashboard file themselves).
+3. If the leader has no `ESTADO:` line for an advisor for > `STALE_THRESHOLD_MIN`
+   (15) min, it is treated as `NO RESPONDE` and the leader follows the standard
+   diagnosis (6.1) before declaring it down (11.5, provider vs. stuck distinction).
+4. Heartbeats are LOW PRIORITY: they must never be used as the primary
+   wake-up mechanism (that is `prompt_async`, golden rule §5.1/§12) and
+   must not generate ACK traffic. They are a presence/readiness signal for
+   the leader's dashboard, not a delivery channel.
+
+**Dashboard suggestion** (`whiteboard/estado_equipo.md`, leader-maintained,
+rewritten on each change — single writer, avoids the R3 heartbeat.json race):
+
+```
+# Estado del equipo (actualizado: <UTC>)
+| Sesion | Modelo | Estado | Capacidad | Ultimo ESTADO |
+|---|---|---|---|---|
+| ses_... | big-pickle | DISPONIBLE | full stack | 12:00Z |
+| ses_... | mimo-v2.5-free | DISPONIBLE | verificacion/bugs | 11:58Z |
+| ses_... | nemotron-3-ultra-free | OCUPADO | full | 11:55Z |
+```
+
+> **UTC MANDATORY:** the "Ultimo ESTADO" column MUST use UTC with the `Z`
+> suffix (e.g. `12:00Z`, not `12:00` or local time). The leader compares
+> these timestamps with its own UTC clock to determine the > 15 min threshold
+> (rule 3). Without the Z suffix, time comparisons will be wrong on machines
+> with non-UTC local time.
+
+> This replaces the ad-hoc STATUS CHECK round (what nemotron ran as leader
+> with `noReply=true`, which never woke the advisors — their finding #1):
+> with the heartbeat, availability is already known before any task dispatch.
+
 ## 11. Known issues and solutions
 
 > **Expanded in v1.1** with real cases observed during the improvement
@@ -909,7 +1174,27 @@ Updated per round, not in real time. Suggested format:
 2. **Mojibake** (accents as `?`): send plain ASCII, fix when integrating.
    Details: `CROSS_WINDOWS.md` #2.
 3. **Agents that reply only in THEIR chat** without sending via API (section 5):
-   demand the send, not the drafting.
+   demand the send, not the drafting. **v1.7 E2E finding (TEST-E2E-85):**
+   nemotron-3-ultra-free wrote the complete reply with its signature in its
+   own chat but NEVER sent it via API, even after 3 nudges describing the
+   method; it only worked when the leader sent the ready-to-copy script
+   verbatim (see §4d rule). openrouter/free breaks the PowerShell command
+   syntax (missing `)` errors) and also needs the script verbatim.
+   **v1.7.1 finding (TEST-E2E-86):** openrouter/free STILL failed with the
+   script (copied the source line as payload text, literal `` `n `` and
+   `$(Get-Date)` unexpanded); the **pre-built JSON fallback** (§4d) — leader
+   writes the payload file, advisor runs one `curl --data-binary "@file"`
+   line — worked in 1 nudge.
+   **Guideline: from v1.7 on, the leader always embeds the ready-to-copy
+   script in the task message (§4d); if the advisor still fails, escalate
+   to the pre-built JSON fallback (§4d, v1.7.1) — do not assume the advisor
+   can build the curl/PowerShell command itself.**
+   **v1.8 (ESTADO-88, 2026-08-19):** nemotron as leader sent its status
+   check with `noReply=true` and the advisors never woke (their finding
+   #1); the re-run by the leader with `prompt_async` + ready-to-copy
+   script got 3/3 replies in minutes. Also: a send loop without `-m`
+   timeout in curl hung the shell and truncated delivery to 1 of 3
+   advisors — always set `-m 30` or use the wrapper (4e.2).
 4. **Agents stuck with empty `assistant`:** verify with double reading (6.1b)
    and `sigue` (6.1c); do not fire `sigue` in a loop (wait ~30-60 s).
 5. **Provider down (does not respond even when requested):** it is not a stuck agent, it is
@@ -930,6 +1215,15 @@ Updated per round, not in real time. Suggested format:
    **did not arrive** even though the script reported success. Rule: mandatory
    auto-detection before EACH send (section 1) or use the wrapper (4e), which ignores
    fixed values. Verify with `GET /global/health` after detecting.
+10. **Hardcoded port in status check (v1.8, nemotron case, 2026-08-19):**
+    nemotron as leader sent its status check with a hardcoded port `10844`
+    (the port from a previous session); the server had restarted and the
+    port was different. The sends succeeded (HTTP 200) but the messages
+    went to a dead port. Additionally, `noReply=true` was used so the
+    advisors never woke. **Rule: ALWAYS auto-detect the port before EACH
+    send (section 1) or use the wrapper (4e/4e.2).** Never hardcode ports.
+    Verify with `GET /global/health` after detecting. This is a specific
+    instance of the general class documented in item 9.
 
 ## 12. Anti-sleep protocol (v1.6, with v1.6.1 corrections)
 

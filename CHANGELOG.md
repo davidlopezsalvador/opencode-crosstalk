@@ -9,6 +9,144 @@ mixed current specification with changelog and PowerShell pitfalls).
 
 ## Versions
 
+### v1.8 (2026-08-19) — heartbeat ESTADO: + enhanced wrapper (low-cost ops)
+
+Two parallel tracks converge here: nemotron-3-ultra-free's failed experiment
+as leader, and the leader's ESTADO-88 re-run (3/3 advisors replied via API
+with `prompt_async` + ready-to-copy script in minutes — openrouter/free did
+NOT respond in this round: it stayed paused by its provider's rate limit,
+later it wrote its REVISION-89 vote only in its own chat, never via API).
+
+nemotron reported 8 difficulties and 8 protocol improvement proposals.
+The leader ran a REVISION-89 consultation round with all advisors (4 votes
+received via API with verified signatures: mimo, nemotron, minimax,
+big-pickle; plus openrouter/free's vote in its own chat and gemma's minimal
+vote — 6/6 total). Result: 6/6 APROBAR (4 with changes). Of nemotron's
+proposals, two were low-cost (no server changes) and were integrated in
+v1.8 by leader decision; the rest were deferred as server-side
+(Appendix A).
+
+- **§10.3 Heartbeat `ESTADO:` convention:** each advisor publishes
+  `ESTADO:sesion:modelo|DISPONIBLE|capacidad=...` in its own history every
+  5 min or on state change; the leader builds a dashboard from
+  `GET /session/:id/message` filtering `^ESTADO:` (estado_equipo.md,
+  single writer). > 15 min without ESTADO → NO RESPONDE → standard
+  diagnosis (6.1) before declaring down. **Replaces the ad-hoc STATUS CHECK
+  round** (which nemotron ran as leader with `noReply=true`, which never woke
+  the advisors — their finding #1). The heartbeat mechanism makes
+  availability known BEFORE any task dispatch, eliminating the need for a
+  separate status-check round.
+- **§4e.2 `Send-CrossMessage.ps1` enhanced wrapper:** adds retry with
+  exponential backoff (2s, 4s, 8s, capped 30s — no more failed-command
+  streaks, §11.6) and optional delivery verification polling the
+  DESTINATION history for a token (`-Token`/`-VerifWait`): HTTP 200/204 is
+  only "accepted", not "processed" (nemotron case). Keeps mandatory
+  auto-detection (RULE v1.4) and ASCII no-BOM payload write.
+
+Rejected/deferred (require server-side changes, out of scope for the
+API-only protocol): `/session/{id}/ping`, `deliveryMode` async_callback,
+automatic ACK header, `/session/{id}/lease`, webhooks, `sessions.json`
+discovery, versioned payload schema, idempotency key with 409. Documented
+for future work (Appendix A).
+
+Corrections applied in `CROSS_TALK.md`:
+
+- **Version header:** v1.7.1 → v1.8, describing both improvements.
+- **§4d/§4f handshake:** `ACK-PROTOCOLO:1.6.1` → `ACK-PROTOCOLO:1.8`
+  (mimo's REVISION-89 note: the handshake examples still said v1.6.1 while
+  the header was already v1.8).
+- **§4e.2 new:** `Send-CrossMessage.ps1` enhanced wrapper (note: `-Token`
+  is mandatory for `-VerifWait` to have effect — nemotron's REVISION-89 note).
+- **§10.3 new:** heartbeat `ESTADO:` convention + dashboard (single writer =
+  the leader; `HEARTBEAT_INTERVAL_MIN`=5, `STALE_THRESHOLD_MIN`=15 as
+  named constants; UTC `Z` mandatory — nemotron/minimax/big-pickle notes).
+- **§11 item 3:** v1.8 findings (noReply=true never wakes; curl without
+  `-m` hung the shell and truncated delivery to 1/3). **§11 item 10 new:**
+  hardcoded port `10844` pitfall (minimax/big-pickle note).
+- **CHANGELOG:** this entry.
+
+### v1.7.1 (2026-08-19) — pre-built JSON fallback (second E2E test TEST-E2E-86)
+
+Re-run of the E2E test applying the v1.7 rule (ready-to-copy script in the
+task message). Result: 4/4 confirmed again, with improvements and a new
+finding:
+
+- **big-pickle, mimo-v2.5-free, nemotron-3-ultra-free:** replied via API in
+  round 1 (nemotron went from 4 rounds in TEST-E2E-85 to 1 round — the v1.7
+  script rule works).
+- **openrouter/free:** STILL failed with the script. Diagnosis from its
+  reasoning: (a) context contaminated by the previous round (verified
+  TEST-E2E-85/ACK-PROTOCOLO:1.6.1 while on round 86); (b) it did NOT
+  execute the script — it copied the SOURCE LINE `$text = "..."` as the
+  payload text, so the signature arrived with literal `` `n `` and
+  `$(Get-Date ...)` unexpanded; (c) it rebuilt the text by hand instead of
+  copying it exactly (`ACK-PROTOCOLO / 1.7` with spaces).
+
+Fix: **pre-built JSON fallback** — the leader writes the complete payload
+file itself (ASCII, no BOM, no interpolation, already signed) in a shared
+path and the advisor runs ONLY the credential-detection lines plus a single
+`curl --data-binary "@archivo"` line. Worked in 1 nudge.
+
+Corrections applied in `CROSS_TALK.md`:
+
+- **Version header:** v1.7 → v1.7.1, describing the new fallback.
+- **§4d new RULE (pre-built JSON fallback):** the last fallback before
+  declaring an advisor incapable of API delivery: leader builds the payload
+  file, advisor runs one curl line.
+- **§11 item 3:** v1.7.1 finding added; escalation guideline
+  script → pre-built JSON.
+- **CHANGELOG:** this entry.
+
+### v1.7 (2026-08-18) — ready-to-copy script rule (E2E test TEST-E2E-85)
+
+End-to-end protocol test with the 4 operative advisors (big-pickle,
+mimo-v2.5-free, openrouter/free, nemotron-3-ultra-free): send → ACK-PROTOCOLO
+→ signed reply via API → leader verifies the token in its history. Result:
+4/4 confirmed, but with the following findings:
+
+- **big-pickle and mimo-v2.5-free:** replied via API in round 1 without help.
+- **openrouter/free:** broke the PowerShell command syntax (missing `)`
+  parser errors) when building the send command itself; needed the
+  ready-to-copy script verbatim (2 rounds).
+- **nemotron-3-ultra-free:** wrote its complete signed reply in its OWN chat
+  but NEVER sent it via API, even after 3 nudges describing the method;
+  only worked when the leader embedded the ready-to-copy script (4 rounds).
+
+Corrections applied in `CROSS_TALK.md`:
+
+- **§4d new RULE (ready-to-copy script):** the leader's task message MUST
+  include the complete send script (auto-detect credentials, ASCII no BOM,
+  `prompt_async`) with the advisor's signed reply already embedded, ready to
+  copy into the bash tool and execute WITHOUT EDITING, plus the
+  verification instruction. Reference script included in the document.
+- **§5 rule 1 (v1.7 note):** if the task message includes the ready-to-copy
+  script, copy it verbatim; do not rebuild the command from memory.
+- **§11 items 3 and 6 (v1.7 E2E finding):** documented the
+  nemotron/openrouter cases and the guideline "from v1.7 on, the leader
+  always embeds the script in the task message".
+- Version header updated: v1.6.1 → v1.7.
+
+### Correction 2026-08-18 — delivery claim and mandatory verification (v1.6.1 patch)
+
+Real incident (task PRESENTACION-84): all 6 advisors answered the task but
+wrote their replies ONLY in their own chat; the leader never received them
+(no API send). The protocol already said "reply via API" (section 5 rule 1),
+but it was not enforced by the leader in the task message nor verified by the
+advisors. Corrections applied in `CROSS_TALK.md`:
+
+- **§4d (delivery claim):** the leader's task message ALWAYS includes the
+  explicit claim of the correct reply method: reply via API
+  (`prompt_async` WITHOUT `noReply`) to the leader's session, NEVER only in
+  the own chat, and VERIFY delivery by reading the leader's history.
+  Added to the canonical message template.
+- **§5 rule 5 (mandatory verification):** the advisor, upon finishing, MUST
+  ask itself whether the way it is sending the reply is the correct one
+  (API to the origin session, NOT its own chat) and MUST VERIFY that the
+  leader received it (read leader's history searching for its token, or
+  check the log / `audit_log.md`). If it cannot confirm arrival, it must NOT
+  assume it arrived: resend via API or notify the leader in its own chat.
+- Rule added as a `> RULE` note after §4d and as new rule 5 in §5.
+
 ### System review - fix F4-F7 (2026-08-13)
 
 Tolerance for historical formats in delivery_log and outbox (minor findings from
