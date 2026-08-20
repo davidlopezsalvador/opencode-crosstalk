@@ -122,6 +122,25 @@ try {
     [Environment]::SetEnvironmentVariable('CROSS_DESKTOP_LOGS_DIR', $oldEnv2)
 }
 
+Write-Host "== T-transport: Get-CrossNetrcFile =="
+$netrc = Get-CrossNetrcFile -Password 'test-pw-123'
+try {
+    Assert-True (Test-Path -LiteralPath $netrc) 'netrc file created' $netrc
+    Assert-True ($netrc -match 'cross_netrc_[0-9a-f]{32}\.txt$') 'netrc unique guid name' $netrc
+    $netrcContent = [System.IO.File]::ReadAllText($netrc, [System.Text.Encoding]::ASCII)
+    Assert-True ($netrcContent -eq "machine 127.0.0.1`nlogin opencode`npassword test-pw-123") 'netrc content ASCII machine/login/password' $netrcContent
+    $acl = [System.IO.File]::GetAccessControl($netrc)
+    Assert-True ($acl.AreAccessRulesProtected) 'netrc ACL protected (no inheritance)' "protected=$($acl.AreAccessRulesProtected)"
+    $netrcRules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.NTAccount]))
+    Assert-True ($netrcRules.Count -eq 1) 'netrc single ACL rule (current user only)' "rules=$($netrcRules.Count)"
+} finally {
+    Remove-Item -LiteralPath $netrc -ErrorAction SilentlyContinue
+}
+if ($haveServer) {
+    $netrcLeftovers = @(Get-ChildItem $env:TEMP -Filter 'cross_netrc_*.txt' -ErrorAction SilentlyContinue)
+    Assert-True ($netrcLeftovers.Count -eq 0) 'no netrc leftovers after Invoke-CrossApi/HealthRaw (finally cleanup)' "leftovers=$($netrcLeftovers.Count)"
+}
+
 Write-Host ""
 if (-not $haveServer) {
     Write-Host ("RESULT: {0} pass, {1} fail, {2} skipped (server-dependent)" -f $pass, $fail, $script:serverScenarios)

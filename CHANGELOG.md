@@ -9,6 +9,58 @@ mixed current specification with changelog and PowerShell pitfalls).
 
 ## Versions
 
+### v1.14.0 (2026-08-20) — Prometheus export + netrc + diagrama README (compatible)
+
+Design origin: external review (GLM-5.3), improvements #6 "Exportación de
+métricas", #7 "Seguridad: manejo de credenciales" y #8 "Diagrama de
+arquitectura para README". Plan 45 approved 3/3 CON CAMBIOS by advisors
+(MIMO APROBADO, NEMOTRON APROBADO CON CAMBIOS, BIG PICKLE APROBADO);
+result verified 3/3 APROBADO.
+
+**Principle:** metrics export only reuses existing sources
+(`Get-CrossMetrics` + `Get-CrossStatus`); credentials never appear on the
+CLI (netrc temp file, restrictive ACL); README gains a versioned
+architecture diagram.
+
+- **#6 Prometheus export** — `Export-CrossMetrics` in
+  `cross-diagnostic.psm1` (`-Since/-Until/-ByAgent/-LogPath/-OutputPath/
+  -OutboxPath`), Prometheus text format 0.0.4: counters
+  `cross_messages_total/acked_total/nacked_total/timeout_total/
+  error_total/noack_total` (from real `by_outcome`), summary
+  `cross_delivery_latency_ms{quantile="0.5"|"0.95"}` (repo P50/P95, no
+  invented P99), gauges `cross_outbox_pending` (EN_VUELO),
+  `cross_messages_dlq`, `cross_messages_quarantine`. HELP documents that
+  metrics only reflect `delivery_log.jsonl` (NEMOTRON-N1), not
+  advisor/reactivation activity (audit_log). `-OutputPath` writes UTF8
+  no-BOM file and returns no `text`; without it returns `text`.
+  CLI `cross metrics --prometheus` emits ONLY the Prometheus text on
+  stdout (scrapeable) and exits 0; `--prometheus-output PATH` (N4 alias)
+  returns JSON with `prometheus_file`. Without `--prometheus` the JSON
+  output is unchanged.
+- **#7 netrc** — `Get-CrossNetrcFile` in `cross-transport.psm1`: temp
+  `cross_netrc_<guid>.txt` in TEMP, ASCII content
+  (`machine <host>` / `login opencode` / `password`), Windows ACL via
+  `icacls /inheritance:r /grant:r` (N2), Unix chmod 600.
+  `Invoke-CrossApi` and `Test-CrossHealthRaw` use `--netrc-file` with
+  cleanup after use; if netrc creation fails → silent fallback to `-u`.
+  `Invoke-CrossApi` API unchanged.
+- **#8 Diagram** — README `## Arquitectura (v1.14.0)` (N3: versioned
+  title): Mermaid `graph TB` (endpoint resolution cache→well-known→log→
+  scan, idempotency v1.7, JSON v2 + v1 fallback, doctor 6 checks, HTTP
+  API `/session/:id/message` + prompt_async + `/global/health`, 3
+  advisors). Project tree updated (33 suites, 7000+ assertions, new
+  modules cross-envelope/cross-diagnostic, T-fuzz).
+- **Tests:** T-transport 29/0 (+6 netrc asserts: content exact, unique
+  guid name, protected ACL single rule, no leftovers after real calls);
+  T-metrics 37/0 (+13 prometheus asserts: TYPE/counters/quantiles P50/P95/
+  gauges/HELP/output file/LOG_NOT_FOUND/USAGE_ERROR); T-cli 47/0
+  (prometheus stdout scrapeable with CRLF tolerance, `--prometheus-output`
+  writes file with TYPE line, LOG_NOT_FOUND).
+
+Suite result: **7093 pass, 0 fail** (33 suites). `cross validate` clean,
+`cross doctor --human` OK. Backup before implementation:
+`backup_v114_20260820_231500.zip`.
+
 ### v1.13.0 (2026-08-20) — contract parser fuzzing (compatible)
 
 Design origin: external review (GLM-5.3), improvement #4 "Tests de contrato

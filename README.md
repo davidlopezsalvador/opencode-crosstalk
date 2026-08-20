@@ -119,17 +119,18 @@ cross-talk/
     ├── lib/
     │   └── cross-format.psm1  # Formatting utilities
     ├── modules/
-    │   ├── cross-transport.psm1   # HTTP transport, port detection, config
-    │   ├── cross-state.psm1       # Outbox, idempotency, mutex
+    │   ├── cross-transport.psm1   # HTTP transport, port detection, netrc, config
+    │   ├── cross-state.psm1       # Outbox, idempotency (checksums v1.7), mutex
     │   ├── cross-delivery.psm1    # ACK/NACK parsing, retries, leases
-    │   ├── cross-diagnostic.psm1  # Polling, status, reconcile, aviso-spof
+    │   ├── cross-envelope.psm1    # JSON envelope v2 + v1 fallback
+    │   ├── cross-diagnostic.psm1  # Status, metrics, doctor, Prometheus export
     │   └── cross-action.psm1      # ack, nack, resume, restart, etc.
-    └── tests/                 # 28 test suites (520+ assertions)
+    └── tests/                 # 33 test suites (7000+ assertions)
         ├── T-ack.ps1
         ├── T-nack.ps1
         ├── T-send.ps1
-        ├── T-e2e.ps1
-        └── ... (28 files)
+        ├── T-fuzz.ps1
+        └── ... (33 files)
 ```
 
 ## How it works
@@ -142,6 +143,47 @@ cross-talk/
 6. **Retry or DLQ** — on failure, retry with backoff; after max retries, move to dead letter queue
 
 The full protocol rules are in [CROSS_TALK.md](CROSS_TALK.md) (section 4 for messaging, section 12 for the anti-sleep protocol).
+
+## Arquitectura (v1.14.0)
+
+```mermaid
+graph TB
+    subgraph "Leader Session"
+        A[cross.ps1 CLI] --> B[cross-transport.psm1]
+        B --> C{Resolve-CrossEndpoint}
+        C -->|cache| D[Port Cache]
+        C -->|well-known| E[server.port]
+        C -->|log| F[OpenCode Logs]
+        C -->|scan| G[TCP Scan]
+    end
+    subgraph "State Layer"
+        H[cross-state.psm1] --> I[outbox.md]
+        H --> J[idempotencia-procesados.md v1.7]
+        H --> K[Mutex/IPC]
+    end
+    subgraph "Delivery Layer"
+        L[cross-delivery.psm1] --> M[cross-envelope.psm1]
+        M --> N[JSON Envelope v2 + fallback v1]
+        L --> O[ACK/NACK Parser]
+    end
+    subgraph "Diagnostic Layer"
+        P[cross-diagnostic.psm1] --> Q[cross doctor - 6 checks]
+        P --> R[cross metrics / Prometheus export]
+    end
+    subgraph "OpenCode Desktop Server"
+        S[HTTP API :PORT] --> T[/session/:id/message]
+        S --> U[prompt_async]
+        S --> V[/global/health]
+    end
+    subgraph "Advisor Sessions"
+        W[Session B]
+        X[Session C]
+    end
+    A --> H
+    A --> L
+    A --> P
+    B --> S
+```
 
 ## Running tests
 

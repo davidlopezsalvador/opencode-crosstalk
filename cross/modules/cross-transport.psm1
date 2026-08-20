@@ -87,13 +87,30 @@ function Get-PasswordHash {
     return (($hash | ForEach-Object { $_.ToString('x2') }) -join '')
 }
 
+function Get-CrossNetrcFile {
+    param([string]$Password, [string]$HostName = '127.0.0.1')
+    $netrcPath = Join-Path $env:TEMP ("cross_netrc_" + [System.Guid]::NewGuid().ToString('N') + ".txt")
+    $content = "machine $HostName`nlogin opencode`npassword $Password"
+    [System.IO.File]::WriteAllText($netrcPath, $content, [System.Text.Encoding]::ASCII)
+    if ($env:OS -eq 'Windows_NT' -or -not $IsWindows) {
+        $user = "$env:USERDOMAIN\$env:USERNAME"
+        $null = & icacls.exe $netrcPath /inheritance:r /grant:r "$user`:(R,W)" 2>$null
+    } else {
+        $null = & chmod 600 $netrcPath 2>$null
+    }
+    return $netrcPath
+}
+
 function Test-CrossHealthRaw {
     param([int]$Port, [string]$Password)
     try {
         $url = "http://127.0.0.1:$Port/global/health"
         $tmp = Join-Path $env:TEMP ("cross_health_" + [System.Guid]::NewGuid().ToString('N') + ".txt")
-        $auth = "opencode:$Password"
-        $code = & curl.exe -s -o $tmp -w "%{http_code}" --max-time 5 -u $auth $url 2>$null
+        $netrcFile = $null
+        try { $netrcFile = Get-CrossNetrcFile -Password $Password } catch { }
+        if ($netrcFile) { $code = & curl.exe -s -o $tmp -w "%{http_code}" --max-time 5 --netrc-file $netrcFile $url 2>$null }
+        else { $code = & curl.exe -s -o $tmp -w "%{http_code}" --max-time 5 -u "opencode:$Password" $url 2>$null }
+        if ($netrcFile) { Remove-Item -LiteralPath $netrcFile -ErrorAction SilentlyContinue }
         $body = if (Test-Path -LiteralPath $tmp) { Get-Content -LiteralPath $tmp -Raw } else { '' }
         Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
         if ($code -eq '401') { return @{ status = 401; healthy = $false } }
@@ -377,7 +394,10 @@ function Invoke-CrossApi {
         [int]$TimeoutSec = 10
     )
     $url = "http://127.0.0.1:$Port$Path"
-    $args = @('-s', '--max-time', "$TimeoutSec", '-u', "opencode:$Password", '-X', $Method)
+    $netrcFile = $null
+    try { $netrcFile = Get-CrossNetrcFile -Password $Password } catch { }
+    if ($netrcFile) { $args = @('-s', '--max-time', "$TimeoutSec", '--netrc-file', $netrcFile, '-X', $Method) }
+    else { $args = @('-s', '--max-time', "$TimeoutSec", '-u', "opencode:$Password", '-X', $Method) }
     $tmpBody = $null
     $tmpOut = Join-Path $env:TEMP ("cross_api_" + [System.Guid]::NewGuid().ToString('N') + ".txt")
     $args += @('-o', $tmpOut, '-w', '%{http_code}')
@@ -388,10 +408,11 @@ function Invoke-CrossApi {
     }
     $args += $url
     $code = & curl.exe @args 2>$null
+    if ($netrcFile) { Remove-Item -LiteralPath $netrcFile -ErrorAction SilentlyContinue }
     $body = if (Test-Path -LiteralPath $tmpOut) { Get-Content -LiteralPath $tmpOut -Raw } else { '' }
     Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
     if ($tmpBody) { Remove-Item -LiteralPath $tmpBody -ErrorAction SilentlyContinue }
     return @{ status = [int]$code; body = $body }
 }
 
-Export-ModuleMember -Function Import-CrossConfig, Get-CrossConfig, Get-CrossPassword, Get-PasswordHash, Test-CrossHealthRaw, Resolve-CrossEndpoint, Invoke-CrossApi, Get-CrossPortFromCache, Write-CrossPortCache, Get-CrossPortFromLog, Get-CrossPortByScan, Get-CrossPortWellKnown, Write-CrossPortWellKnown, Write-CrossDiag
+Export-ModuleMember -Function Import-CrossConfig, Get-CrossConfig, Get-CrossPassword, Get-PasswordHash, Get-CrossNetrcFile, Test-CrossHealthRaw, Resolve-CrossEndpoint, Invoke-CrossApi, Get-CrossPortFromCache, Write-CrossPortCache, Get-CrossPortFromLog, Get-CrossPortByScan, Get-CrossPortWellKnown, Write-CrossPortWellKnown, Write-CrossDiag

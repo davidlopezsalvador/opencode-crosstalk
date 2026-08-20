@@ -206,6 +206,18 @@ Assert-True (-not $r.ok -and $r.code -eq 64 -and $r.err -eq 'USAGE_ERROR') 'metr
 $r = Get-Json (Invoke-CrossCli @('metrics', '--log-path', (Join-Path $env:TEMP 'no_existe_metrics.jsonl')))
 Assert-True (-not $r.ok -and $r.code -eq 64 -and $r.err -eq 'LOG_NOT_FOUND') 'metrics non-existent log -> LOG_NOT_FOUND' $r.err
 
+Write-Host "== T-cli: metrics --prometheus (v1.14) =="
+$rawP = Invoke-CrossCli @('metrics', '--prometheus', '--log-path', $mlog)
+Assert-True ($rawP -match '(?m)^cross_messages_total 3\r?$') 'prometheus stdout text total 3' $rawP
+Assert-True ($rawP -match '(?m)^cross_messages_acked_total 2\r?$') 'prometheus stdout acked 2' $rawP
+Assert-True ($rawP -match '(?m)^# TYPE cross_messages_total counter\r?$') 'prometheus stdout TYPE line' $rawP
+$promFile = Join-Path $metricsDir 'out.prom'
+$r = Get-Json (Invoke-CrossCli @('metrics', '--prometheus', '--prometheus-output', $promFile, '--log-path', $mlog))
+Assert-True ($r.ok -and $r.prometheus_file -eq $promFile) 'prometheus --prometheus-output writes file' ($r | ConvertTo-Json -Compress)
+Assert-True ((Test-Path -LiteralPath $promFile) -and ((Get-Content $promFile -Raw) -match '(?m)^# TYPE cross_messages_total counter$')) 'prom file exists with TYPE line' $promFile
+$r = Get-Json (Invoke-CrossCli @('metrics', '--prometheus', '--log-path', (Join-Path $env:TEMP 'no_existe_prom.jsonl')))
+Assert-True (-not $r.ok -and $r.code -eq 64 -and $r.err -eq 'LOG_NOT_FOUND') 'prometheus non-existent log -> LOG_NOT_FOUND' $r.err
+
 Write-Host ""
 if (-not $haveServer) {
     Write-Host ("RESULT: {0} pass, {1} fail, {2} skipped (server-dependent)" -f $pass, $fail, $script:serverScenarios)

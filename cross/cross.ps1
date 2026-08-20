@@ -40,7 +40,7 @@ $argsList = @($Argv)
 
 $flags = [ordered]@{}
 $positionals = New-Object System.Collections.ArrayList
-$KnownFlags = @('json','human','quiet','no-cache','health-skip','port','password','config','help','directory','session','session-id','since','role','limit','get','set','list','msg','model','owner','force','state-file','outbox-file','text','dest','token','run-id','lease','sucesor','attempt','ack-timeout','max-attempts','no-wait','timeout','apply','quarantine','retry-auto','for','interval','check-file','expected-token','msg-id','agent','reason','note','for-msg-id','for-run-id','task','task-id','from','retries','flag','summary','check-log','minutes','to','log-path','by-agent','until','dry-run-sweep')
+$KnownFlags = @('json','human','quiet','no-cache','health-skip','port','password','config','help','directory','session','session-id','since','role','limit','get','set','list','msg','model','owner','force','state-file','outbox-file','text','dest','token','run-id','lease','sucesor','attempt','ack-timeout','max-attempts','no-wait','timeout','apply','quarantine','retry-auto','for','interval','check-file','expected-token','msg-id','agent','reason','note','for-msg-id','for-run-id','task','task-id','from','retries','flag','summary','check-log','minutes','to','log-path','by-agent','until','dry-run-sweep','prometheus','prometheus-output')
 
 for ($i = 0; $i -lt $argsList.Count; $i++) {
     $arg = $argsList[$i]
@@ -58,13 +58,13 @@ for ($i = 0; $i -lt $argsList.Count; $i++) {
         '^--config$' { $i++; $ConfigPath = $argsList[$i]; break }
         '^--help$' { $Help = $true; break }
         '^-h$' { $Help = $true; break }
-        '^--(directory|session|session-id|since|role|limit|get|set|msg|model|owner|state-file|outbox-file|text|dest|token|run-id|lease|sucesor|attempt|ack-timeout|timeout|max-attempts|for|interval|check-file|expected-token|msg-id|agent|reason|note|for-msg-id|for-run-id|task|task-id|from|retries|flag|summary|minutes|to|log-path|by-agent|until)$' {
+        '^--(directory|session|session-id|since|role|limit|get|set|msg|model|owner|state-file|outbox-file|text|dest|token|run-id|lease|sucesor|attempt|ack-timeout|timeout|max-attempts|for|interval|check-file|expected-token|msg-id|agent|reason|note|for-msg-id|for-run-id|task|task-id|from|retries|flag|summary|minutes|to|log-path|by-agent|until|prometheus-output)$' {
             $name = $Matches[1]
             if (($i + 1) -lt $argsList.Count) { $i++; $flags[$name] = $argsList[$i] }
             else { $flags[$name] = $true }
             break
         }
-        '^--(directory|session|session-id|since|role|limit|get|set|msg|model|owner|state-file|outbox-file|text|dest|token|run-id|lease|sucesor|attempt|ack-timeout|timeout|max-attempts|for|interval|check-file|expected-token|msg-id|agent|reason|note|for-msg-id|for-run-id|task|task-id|from|retries|flag|summary|minutes|to|log-path|by-agent|until)=(.+)$' {
+        '^--(directory|session|session-id|since|role|limit|get|set|msg|model|owner|state-file|outbox-file|text|dest|token|run-id|lease|sucesor|attempt|ack-timeout|timeout|max-attempts|for|interval|check-file|expected-token|msg-id|agent|reason|note|for-msg-id|for-run-id|task|task-id|from|retries|flag|summary|minutes|to|log-path|by-agent|until|prometheus-output)=(.+)$' {
             $name = $Matches[1]
             $flags[$name] = $Matches[2]
             break
@@ -746,6 +746,19 @@ switch ($Command) {
     }
     'metrics' {
         $watch = [System.Diagnostics.Stopwatch]::StartNew()
+        if ($flags['prometheus']) {
+            $res = Export-CrossMetrics -Since ([string]$flags['since']) -Until ([string]$flags['until']) -ByAgent ([string]$flags['by-agent']) -LogPath ([string]$flags['log-path']) -OutputPath ([string]$flags['prometheus-output']) -OutboxPath ([string]$flags['outbox-file'])
+            if (-not $res.ok) {
+                $r = New-Result -Ok $false -Code 64 -Data @{ err = $res.err; detail = $res.detail } -Cmd 'metrics'
+                Out-Result $r 'metrics' -Watch $watch
+            }
+            if ($res.output) {
+                $r = New-Result -Ok $true -Code 0 -Data @{ prometheus_file = $res.output; lines = $res.lines; source = $res.source; log_path = $res.log_path } -Cmd 'metrics'
+                Out-Result $r 'metrics' -Watch $watch
+            }
+            [Console]::Write($res.text)
+            exit 0
+        }
         $res = Get-CrossMetrics -Since ([string]$flags['since']) -Until ([string]$flags['until']) -ByAgent ([string]$flags['by-agent']) -LogPath ([string]$flags['log-path'])
         if (-not $res.ok) {
             $r = New-Result -Ok $false -Code 64 -Data @{ err = $res.err; detail = $res.detail } -Cmd 'metrics'

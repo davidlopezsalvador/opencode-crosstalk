@@ -605,6 +605,61 @@ function Get-CrossMetrics {
     }
 }
 
+function Export-CrossMetrics {
+    param(
+        [string]$Since = '',
+        [string]$Until = '',
+        [string]$ByAgent = '',
+        [string]$LogPath = '',
+        [string]$OutputPath = '',
+        [string]$OutboxPath = ''
+    )
+    $m = Get-CrossMetrics -Since $Since -Until $Until -ByAgent $ByAgent -LogPath $LogPath
+    if (-not $m.ok) { return @{ ok = $false; err = $m.err; detail = $m.detail } }
+    $pending = 0
+    $status = Get-CrossStatus -OutboxPath $OutboxPath
+    if ($status.ok -and $null -ne $status.outbox_by_state -and $status.outbox_by_state.ContainsKey('EN_VUELO')) { $pending = [int]$status.outbox_by_state['EN_VUELO'] }
+    $oc = $m.by_outcome
+    $lines = New-Object System.Collections.ArrayList
+    [void]$lines.Add('# HELP cross_messages_total Total messages tracked in delivery_log.jsonl (envios via cross send; la actividad de asesores/reactivaciones esta en audit_log, no aqui)')
+    [void]$lines.Add('# TYPE cross_messages_total counter')
+    [void]$lines.Add("cross_messages_total $($m.total)")
+    [void]$lines.Add('# HELP cross_messages_acked_total Messages confirmed (ACK received)')
+    [void]$lines.Add('# TYPE cross_messages_acked_total counter')
+    [void]$lines.Add("cross_messages_acked_total $($oc.ACK)")
+    [void]$lines.Add('# HELP cross_messages_nacked_total Messages rejected (NACK received)')
+    [void]$lines.Add('# TYPE cross_messages_nacked_total counter')
+    [void]$lines.Add("cross_messages_nacked_total $($oc.NACK)")
+    [void]$lines.Add('# HELP cross_messages_timeout_total Messages expired by ACK timeout')
+    [void]$lines.Add('# TYPE cross_messages_timeout_total counter')
+    [void]$lines.Add("cross_messages_timeout_total $($oc.TIMEOUT)")
+    [void]$lines.Add('# HELP cross_messages_error_total Messages failed with error')
+    [void]$lines.Add('# TYPE cross_messages_error_total counter')
+    [void]$lines.Add("cross_messages_error_total $($oc.ERROR)")
+    [void]$lines.Add('# HELP cross_messages_noack_total Messages delivered without waiting for ACK (no-wait / PENDING)')
+    [void]$lines.Add('# TYPE cross_messages_noack_total counter')
+    [void]$lines.Add("cross_messages_noack_total $($oc.NO_ACK)")
+    [void]$lines.Add('# HELP cross_delivery_latency_ms Delivery latency in milliseconds (summary; solo quantiles P50/P95, el repositorio no calcula P99)')
+    [void]$lines.Add('# TYPE cross_delivery_latency_ms summary')
+    if ($null -ne $m.latency_p50_ms) { [void]$lines.Add('cross_delivery_latency_ms{quantile="0.5"} ' + $m.latency_p50_ms) }
+    if ($null -ne $m.latency_p95_ms) { [void]$lines.Add('cross_delivery_latency_ms{quantile="0.95"} ' + $m.latency_p95_ms) }
+    [void]$lines.Add('# HELP cross_outbox_pending Pending messages in outbox (state EN_VUELO)')
+    [void]$lines.Add('# TYPE cross_outbox_pending gauge')
+    [void]$lines.Add("cross_outbox_pending $pending")
+    [void]$lines.Add('# HELP cross_messages_dlq Messages moved to dead letter queue')
+    [void]$lines.Add('# TYPE cross_messages_dlq gauge')
+    [void]$lines.Add("cross_messages_dlq $($m.dlq)")
+    [void]$lines.Add('# HELP cross_messages_quarantine Messages quarantined for human review')
+    [void]$lines.Add('# TYPE cross_messages_quarantine gauge')
+    [void]$lines.Add("cross_messages_quarantine $($m.quarantine)")
+    $text = ($lines -join "`n") + "`n"
+    if ($OutputPath) {
+        [System.IO.File]::WriteAllText($OutputPath, $text, (New-Object System.Text.UTF8Encoding($false)))
+        return @{ ok = $true; output = $OutputPath; lines = $lines.Count; source = $m.source; log_path = $m.log_path }
+    }
+    return @{ ok = $true; text = $text; lines = $lines.Count; source = $m.source; log_path = $m.log_path }
+}
+
 function Get-CrossDoctorReport {
     param([string]$ConfigPath = '')
     $checks = New-Object System.Collections.ArrayList
@@ -691,4 +746,4 @@ function Get-CrossDoctorReport {
     }
 }
 
-Export-ModuleMember -Function Get-CrossPoll, Get-CrossStatus, Get-CrossReconcile, Get-CrossAvisoSpof, Get-SessionState, Read-EscalatedLog, Read-DlqLog, Find-AuditOutcome, Get-CrossMetrics, Get-PollDiagnostic, Get-CrossDoctorReport
+Export-ModuleMember -Function Get-CrossPoll, Get-CrossStatus, Get-CrossReconcile, Get-CrossAvisoSpof, Get-SessionState, Read-EscalatedLog, Read-DlqLog, Find-AuditOutcome, Get-CrossMetrics, Export-CrossMetrics, Get-PollDiagnostic, Get-CrossDoctorReport
