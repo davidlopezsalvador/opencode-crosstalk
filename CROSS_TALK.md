@@ -1739,6 +1739,19 @@ files (audit, escalated, DLQ, outbox); they do not rewrite previous lines.
 > | MEDIUM | MEDIUM-HIGH | **SSE / long-polling** | Only if the backend supports it; if not, do NOT implement. Test experimentally first: `GET /event`, create activity, observe `session.status`/`message.updated`/`session.idle`/`session.error` (external review). |
 > | LOW | LOW | **`@opencode-ai/sdk` SDK** | DX improvement; `curl`+ASCII works now. Verify semantics first. |
 > | LOW/MEDIUM | HIGH | **`session.abort`** | Opt-in / soft-abort only first. Blind aborting may leave inconsistent states. |
+> | LOW/MEDIUM | MEDIUM-HIGH | **Envelope v2 exclusive (Fase 3, v2.0)** | Breaking: remove the v1 parser and the legacy regexes in `Parse-CrossAckText`; v2 (`ENVELOPE-V2: {json}` / pure JSON) becomes the only accepted format. Requires Fase 2 (v1.10 deprecation warning, `ConvertTo-CrossV1` already exists) and all 3 advisors answering v2 stably before disabling v1. |
+
+- **Envelope JSON v2 exclusive (Fase 3, v2.0):** endgame of improvement #1
+  (GLM-5.3 design, "Sobre estructurado JSON"). The engine currently accepts
+  v2 first and falls back to v1 (see §12.1 ENVELOPE-V2 note, v1.9.0). Fase 3
+  makes v2 the ONLY format: `Parse-CrossAckText` (6+ v1 regexes, legacy
+  special cases E1/firma incompleta) is removed, and the contract becomes
+  fully validated (`v=2`, `type` ∈ {message,ack,nack}, mandatory non-empty
+  `msg_id`/`timestamp`, `requires_ack` bool — invariants already enforced by
+  the T-fuzz fuzzer). **Dependencies:** Fase 2 deprecation first (v1.10,
+  warning on v1 messages so advisors migrate), plus live coordination with
+  the 3 advisors (MIMO, NEMOTRON, BIG PICKLE) since they still reply in v1
+  formats. Breaking change → v2.0 versioning.
 
 - **Long-polling / SSE:** if the OpenCode Desktop API ever supports them,
   replace active polling (section 6) with these mechanisms to reduce
