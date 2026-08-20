@@ -14,8 +14,8 @@ mixed current specification with changelog and PowerShell pitfalls).
 Design origin: external review (GLM-5.3, shared Z.ai chat "Revisión Repositorio
 GitHub"), improvement #1 "Sobre estructurado JSON" (alta prioridad). Human
 approved scope: ONLY Fase 1 (v1.9). Plan 40 approved 3/3 CON CAMBIOS by
-advisors; result verified 2/3 APROBADO (MIMO, NEMOTRON); ROUTER PENDIENTE
-(rate limit 429, reset 2026-08-21 02:00 local).
+advisors; result verified 2/3 APROBADO (MIMO, NEMOTRON); ROUTER discarded
+by human decision (continue without free models, verdict not retried).
 
 **Principle:** the v1 envelope (`[msg_id=... | ...]`, section 12.1) is NOT
 modified; the v2 envelope travels as an ADDITIONAL line `ENVELOPE-V2: {json}`
