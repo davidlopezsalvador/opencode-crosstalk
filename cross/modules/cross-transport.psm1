@@ -7,6 +7,23 @@ if (-not (Get-Command Get-CrossPlatform -ErrorAction SilentlyContinue)) {
 $script:Config = $null
 $script:PortCache = Join-Path (Get-CrossTempDir) 'cross-port.cache'
 $script:EnvFile = Get-CrossEnvFile
+$script:DiagLevel = ([Environment]::GetEnvironmentVariable('CROSS_DIAG')) -replace '^\s*|\s*$',''
+if (-not $script:DiagLevel) { $script:DiagLevel = 'warn' }
+$script:DiagLevel = $script:DiagLevel.ToLower()
+
+function Write-CrossDiag {
+    param(
+        [Parameter(Mandatory=$true)][ValidateSet('trace','debug','info','warn')][string]$Level,
+        [Parameter(Mandatory=$true)][string]$Message
+    )
+    $order = @{ trace = 0; debug = 1; info = 2; warn = 3 }
+    if ($order[$Level] -lt $order[$script:DiagLevel]) { return }
+    try {
+        [System.Console]::Error.WriteLine("[cross-diag] $($Level.ToUpper()) $Message")
+    } catch {
+        # diag es best-effort
+    }
+}
 
 function Import-CrossConfig {
     param([string]$ConfigPath = '')
@@ -116,6 +133,43 @@ function Write-CrossPortCache {
     }
 }
 
+# Cadena de descubrimiento (NEMOTRON-N5): cache -> well-known -> log -> scan,
+# con health check en cada paso antes de confiar en el puerto.
+function Get-CrossPortWellKnown {
+    $configDir = Get-CrossConfigDir
+    if (-not $configDir) { return $null }
+    $file = Join-Path $configDir 'server.port'
+    if (-not (Test-Path -LiteralPath $file)) { return $null }
+    try {
+        $value = (Get-Content -LiteralPath $file -Raw).Trim()
+        if ($value -match '^\d+$') {
+            $port = [int]$value
+            if ($port -ge 1 -and $port -le 65535) { return $port }
+        }
+        Write-CrossDiag -Level debug -Message "well-known '$file' vacio o corrupto -> null"
+        return $null
+    } catch {
+        Write-CrossDiag -Level debug -Message "well-known '$file' ilegible -> null"
+        return $null
+    }
+}
+
+function Write-CrossPortWellKnown {
+    param([int]$Port)
+    if ($Port -lt 1 -or $Port -gt 65535) {
+        Write-CrossDiag -Level warn -Message "Write-CrossPortWellKnown ignora puerto invalido $Port"
+        return
+    }
+    $configDir = Get-CrossConfigDir
+    if (-not $configDir) { return }
+    try {
+        if (-not (Test-Path -LiteralPath $configDir)) { New-Item -ItemType Directory -Path $configDir -Force | Out-Null }
+        [System.IO.File]::WriteAllText((Join-Path $configDir 'server.port'), "$Port", (New-Object System.Text.UTF8Encoding($false)))
+    } catch {
+        # well-known es best-effort (NEMOTRON-N1: validacion previa; el scan queda como fallback)
+    }
+}
+
 function Get-CrossPortFromLog {
     $logsDir = Expand-Path ([Environment]::GetEnvironmentVariable('CROSS_DESKTOP_LOGS_DIR'))
     if (-not $logsDir) {
@@ -160,10 +214,15 @@ function Get-CrossPortFromLog {
 }
 
 function Get-CrossPortByScan {
-    param([int[]]$ScanRange = @(30000, 40000))
+    param([int[]]$ScanRange = @(30000, 40000), [int]$ScanTimeoutMs = 30000)
     $lo = $ScanRange[0]; $hi = $ScanRange[1]
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
     $candidates = New-Object System.Collections.ArrayList
     for ($p = $lo; $p -le $hi; $p++) {
+        if ($watch.Elapsed.TotalMilliseconds -gt $ScanTimeoutMs) {
+            Write-CrossDiag -Level debug -Message "scan abierto por ScanTimeoutMs=$ScanTimeoutMs tras $p puertos"
+            break
+        }
         $tcp = $null
         try {
             $tcp = New-Object System.Net.Sockets.TcpClient
@@ -239,7 +298,28 @@ function Resolve-CrossEndpoint {
                 $watch.Stop()
                 return @{ ok = $true; code = 0; port = $cached; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
             }
+            Write-CrossDiag -Level warn -Message "cache descartado: puerto $cached no healthy (status $($h.status))"
+        } else {
+            Write-CrossDiag -Level debug -Message 'cache: sin entrada valida'
         }
+    }
+
+    $wellKnown = Get-CrossPortWellKnown
+    if ($wellKnown) {
+        $detectionMethod = 'well-known'
+        if ($HealthSkip) {
+            $watch.Stop()
+            return @{ ok = $true; code = 0; port = $wellKnown; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
+        }
+        $h = Test-CrossHealthRaw -Port $wellKnown -Password $Password
+        if ($h.healthy) {
+            Write-CrossPortCache -Port $wellKnown -PasswordHash $pwHash
+            $watch.Stop()
+            return @{ ok = $true; code = 0; port = $wellKnown; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
+        }
+        Write-CrossDiag -Level warn -Message "well-known descartado: puerto $wellKnown no healthy (status $($h.status))"
+    } else {
+        Write-CrossDiag -Level debug -Message 'well-known: sin archivo valido'
     }
 
     $fromLog = Get-CrossPortFromLog
@@ -256,9 +336,15 @@ function Resolve-CrossEndpoint {
             $watch.Stop()
             return @{ ok = $true; code = 0; port = $fromLog; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
         }
+        Write-CrossDiag -Level warn -Message "log descartado: puerto $fromLog no healthy (status $($h.status))"
+    } else {
+        Write-CrossDiag -Level debug -Message 'log: sin puerto detectado (regex no matcheo o dir inexistente)'
     }
 
-    $scanned = Get-CrossPortByScan -ScanRange $config.port_scan_range
+    $scanTimeoutMs = $config.port_scan_timeout_ms
+    if (-not $scanTimeoutMs) { $scanTimeoutMs = 30000 }
+    Write-CrossDiag -Level debug -Message "iniciando scan [$($config.port_scan_range[0])-$($config.port_scan_range[1])] ScanTimeoutMs=$scanTimeoutMs"
+    $scanned = Get-CrossPortByScan -ScanRange $config.port_scan_range -ScanTimeoutMs $scanTimeoutMs
     if ($scanned) {
         $detectionMethod = 'scan'
         if ($HealthSkip) {
@@ -272,6 +358,9 @@ function Resolve-CrossEndpoint {
             $watch.Stop()
             return @{ ok = $true; code = 0; port = $scanned; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
         }
+        Write-CrossDiag -Level warn -Message "scan descartado: puerto $scanned no healthy (status $($h.status))"
+    } else {
+        Write-CrossDiag -Level warn -Message "scan: sin candidatos healthy (ScanTimeoutMs=$scanTimeoutMs)"
     }
 
     $watch.Stop()
@@ -305,4 +394,4 @@ function Invoke-CrossApi {
     return @{ status = [int]$code; body = $body }
 }
 
-Export-ModuleMember -Function Import-CrossConfig, Get-CrossConfig, Get-CrossPassword, Get-PasswordHash, Test-CrossHealthRaw, Resolve-CrossEndpoint, Invoke-CrossApi, Get-CrossPortFromCache, Write-CrossPortCache, Get-CrossPortFromLog, Get-CrossPortByScan
+Export-ModuleMember -Function Import-CrossConfig, Get-CrossConfig, Get-CrossPassword, Get-PasswordHash, Test-CrossHealthRaw, Resolve-CrossEndpoint, Invoke-CrossApi, Get-CrossPortFromCache, Write-CrossPortCache, Get-CrossPortFromLog, Get-CrossPortByScan, Get-CrossPortWellKnown, Write-CrossPortWellKnown, Write-CrossDiag

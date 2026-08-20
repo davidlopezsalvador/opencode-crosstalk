@@ -14,6 +14,7 @@
     "session_growing_check_ms":  15000,
     "protocol_version":  "1.8",
     "port_cache_ttl_s":  60,
+    "port_scan_timeout_ms":  30000,
     "port_scan_range":  [
                             30000,
                             40000

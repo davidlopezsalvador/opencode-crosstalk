@@ -9,6 +9,38 @@ mixed current specification with changelog and PowerShell pitfalls).
 
 ## Versions
 
+### v1.11.0 (2026-08-20) — improved port discovery (well-known + diag) (compatible)
+
+Design origin: external review (GLM-5.3), improvement #3 "Descubrimiento de
+puerto mejorado". Plan 42 approved 3/3 CON CAMBIOS by advisors (MIMO,
+NEMOTRON, BIG PICKLE); result verified 3/3 APROBADO. Chain order (NEMOTRON-N5):
+**cache → well-known → log → scan**, health check before trusting each source.
+
+- **`Get-CrossPortWellKnown`** — reads `server.port` from the config dir
+  (`Get-CrossConfigDir`, v1.10). Empty/corrupt/out-of-range file → `$null`
+  (no throw, debug log; NEMOTRON-N2).
+- **`Write-CrossPortWellKnown`** — best-effort write of the verified port to
+  `<configdir>/server.port` (creates dir if missing); validates port 1-65535
+  before writing (NEMOTRON-N1).
+- **`Write-CrossDiag`** — non-intrusive logging to stderr, prefix
+  `[cross-diag]`, levels trace/debug/info/warn gated by env `CROSS_DIAG`
+  (default `warn`; trace level per NEMOTRON-N4). Used by `Resolve-CrossEndpoint`
+  to record each source's verdict/descarte reason.
+- **`Get-CrossPortByScan`** — new `ScanTimeoutMs` param (default 30000,
+  config `port_scan_timeout_ms`) aborts the loop via Stopwatch; closes the
+  worst case of a serial 20+ s scan.
+- **`Resolve-CrossEndpoint`** — chain `cache → well-known → log → scan`;
+  new `detection_method='well-known'`; per-source `Write-CrossDiag` and
+  effective `ScanTimeoutMs` in diagnostics (NEMOTRON-N3). API unchanged.
+- **New test `cross/tests/T-port.ps1`** — 19 assertions: well-known
+  round-trip (isolated USERPROFILE), invalid/empty/out-of-range → null,
+  ports 0/70000 rejected, diag levels (silent default / warn / trace),
+  scan timeout aborts < 1 s, real chain → `detection_method=well-known`,
+  corrupt well-known falls through to regex/scan.
+
+Suite result: **586 pass, 0 fail** (31 suites). `cross validate` clean.
+Backup before implementation: `backup_v110_20260820_211843.zip`.
+
 ### v1.10.0 (2026-08-20) — cross-platform IPC abstraction (compatible)
 
 Design origin: external review (GLM-5.3, shared Z.ai chat), improvement #2
