@@ -135,18 +135,32 @@ function Parse-CrossEnvelope {
     try {
         $obj = $candidate | ConvertFrom-Json
     } catch {
-        return $invalid
+        $obj = $null
+    }
+    if ($null -eq $obj) {
+        # Varios JSON en la misma linea (p.ej. dos ENVELOPE-V2): gana la
+        # primera ocurrencia parseable; se prueban los recortes en cada '}'
+        # (un '}' dentro de un string de payload falla y se sigue probando).
+        $closeIdx = $candidate.IndexOf('}')
+        while ($closeIdx -ge 0) {
+            try { $obj = $candidate.Substring(0, $closeIdx + 1) | ConvertFrom-Json } catch { $obj = $null }
+            if ($null -ne $obj) { $candidate = $candidate.Substring(0, $closeIdx + 1); break }
+            $closeIdx = $candidate.IndexOf('}', $closeIdx + 1)
+        }
     }
     if ($null -eq $obj) { return $invalid }
     $vProp = $obj.PSObject.Properties['v']
     $typeProp = $obj.PSObject.Properties['type']
-    if (-not $vProp -or [int]$obj.v -ne 2 -or -not $typeProp) { return $invalid }
+    if (-not $vProp -or -not $typeProp) { return $invalid }
+    try { if ([int]$obj.v -ne 2) { return $invalid } } catch { return $invalid }
     $type = [string]$obj.type
     if ($type -notin @('message', 'ack', 'nack')) { return $invalid }
+    $midProp = $obj.PSObject.Properties['msg_id']
+    if (-not $midProp -or $null -eq $midProp.Value -or [string]$midProp.Value -eq '') { return $invalid }
     $reqAckProp = $obj.PSObject.Properties['requires_ack']
     if ($reqAckProp -and $obj.requires_ack -isnot [bool]) { return $invalid }
     $tsProp = $obj.PSObject.Properties['timestamp']
-    if ($tsProp -and [string]$obj.timestamp -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}') { return $invalid }
+    if (-not $tsProp -or [string]$obj.timestamp -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}') { return $invalid }
     function Get-Str([object]$o, [string]$k) {
         $p = $o.PSObject.Properties[$k]
         if ($null -ne $p -and $null -ne $p.Value) { return [string]$p.Value }

@@ -9,6 +9,53 @@ mixed current specification with changelog and PowerShell pitfalls).
 
 ## Versions
 
+### v1.13.0 (2026-08-20) — contract parser fuzzing (compatible)
+
+Design origin: external review (GLM-5.3), improvement #4 "Tests de contrato
+/ fuzzing". Plan 44 approved 3/3 CON CAMBIOS by advisors (MIMO, NEMOTRON,
+BIG PICKLE); result verified 3/3 APROBADO.
+
+**Principle:** the fuzzer only OBSERVES the contract (it never changes what
+is accepted); it found 4 real bugs which were fixed (defense + validation).
+API unchanged: `Parse-CrossEnvelope` output schema identical, only internal
+validations hardened.
+
+- **New test `cross/tests/T-fuzz.ps1`** — deterministic (seed `20260820`,
+  documented in the header, corpus regenerable via `Get-FuzzCorpus`),
+  bounded (< 30 s): 10-valid-input corpus × 8 mutators × 20 mutations + one
+  10 MB input per corpus (NEMOTRON-N1: memory/DoS limits) = 1610
+  evaluations × 2 parsers. Mutators: truncate, insert chars, JSON field
+  duplication/removal, weird types (null/true/123/[]/{}/NaN/Infinity),
+  broken JSON + garbage, hostile unicode (BOM, RTL, control chars — N4),
+  multiple `ENVELOPE-V2:` per text (N3: first parseable occurrence wins),
+  `ENVELOPE-V2:` without JSON / `{}` / `[]`.
+- **Invariants per mutation:** `Parse-CrossEnvelope` and `Parse-CrossAckText`
+  never throw; `valid`/`ack`/`nack`/`protocolo` always bool; if
+  `valid=$true` → `format` = v2-json, `type` ∈ {message,ack,nack},
+  `msg_id`/`timestamp` non-empty, `requires_ack` bool; if `ack` → `token`
+  non-empty + `emisor`; if `nack` → `token` non-empty + `razon`;
+  type=message → ack=false and nack=false.
+- **Bugs found by the fuzzer and fixed** in `Parse-CrossEnvelope`:
+  - non-int `v` (e.g. `"2x"`) threw an exception outside the try/catch →
+    defensive try/catch + invalid.
+  - empty `msg_id` was accepted (valid=true) → now mandatory non-empty.
+  - missing `timestamp` was accepted → now mandatory with ISO format.
+  - two `ENVELOPE-V2:` on the same line both failed (concatenated JSON) →
+    iterative truncation at each `}` so the first parseable occurrence wins
+    (payloads containing `}` inside strings still work: every `}` position
+    is tried).
+- **8 fixed regression cases** added to T-fuzz (minimal valid, empty
+  msg_id rejected, missing timestamp rejected, non-int v rejected,
+  duplicated JSON fields tolerated, multi-envelope first-wins, message is
+  not ack, BOM before JSON tolerated).
+- **N2 (NEMOTRON):** exact counts documented — 20 mutations × 8 types =
+  160 variants per corpus entry → 1610 total evaluations (asserted).
+- **N5 (NEMOTRON):** seed and corpus regeneration documented in the test.
+
+Suite result: **7063 pass, 0 fail** (33 suites; T-contract 39/0 unchanged,
+T-fuzz 6450/0). `cross validate` clean. Backup before implementation:
+`backup_v113_20260820_221440.zip`.
+
 ### v1.12.0 (2026-08-20) — checksums de integridad + `cross doctor` (compatible)
 
 Design origin: external review (GLM-5.3), improvement #5 "Idempotencia
