@@ -605,4 +605,90 @@ function Get-CrossMetrics {
     }
 }
 
-Export-ModuleMember -Function Get-CrossPoll, Get-CrossStatus, Get-CrossReconcile, Get-CrossAvisoSpof, Get-SessionState, Read-EscalatedLog, Read-DlqLog, Find-AuditOutcome, Get-CrossMetrics, Get-PollDiagnostic
+function Get-CrossDoctorReport {
+    param([string]$ConfigPath = '')
+    $checks = New-Object System.Collections.ArrayList
+
+    # 1. config
+    try {
+        $cfg = if ($ConfigPath) { Import-CrossConfig -ConfigPath $ConfigPath } else { Get-CrossConfig }
+        $idOk = [bool]($cfg.my_session_id) -and [bool]($cfg.my_role)
+        $detail = "my_session_id='$($cfg.my_session_id)' role=$($cfg.my_role)"
+        [void]$checks.Add([ordered]@{ name = 'config'; status = $(if ($idOk) { 'ok' } else { 'warn' }); detail = $detail })
+    } catch {
+        [void]$checks.Add([ordered]@{ name = 'config'; status = 'fail'; detail = "config no valido: $_" })
+    }
+
+    # 2. paths
+    try {
+        $paths = Get-DiagPaths
+        $pathIssues = @()
+        foreach ($entry in $paths.GetEnumerator()) {
+            $expanded = [Environment]::ExpandEnvironmentVariables([string]$entry.Value)
+            if (-not $expanded) { $pathIssues += "$($entry.Key): ruta vacia"; continue }
+            $full = [System.IO.Path]::GetFullPath($expanded)
+            $dir = Split-Path -Parent $full
+            if (-not (Test-Path -LiteralPath $dir)) { $pathIssues += "$($entry.Key): dir no existe ($dir)" }
+        }
+        if ($pathIssues.Count -eq 0) { [void]$checks.Add([ordered]@{ name = 'paths'; status = 'ok'; detail = 'whiteboard dirs resolubles' }) }
+        else { [void]$checks.Add([ordered]@{ name = 'paths'; status = 'warn'; detail = ($pathIssues -join '; ') }) }
+    } catch {
+        [void]$checks.Add([ordered]@{ name = 'paths'; status = 'warn'; detail = "paths no verificables: $_" })
+    }
+
+    # 3. integrity (checksum v1.7 + malformadas + consistencia)
+    try {
+        $stateEx = Read-IdempotenciaLogEx
+        $outboxEntries = @(Read-OutboxLog)
+        $malformed = @($outboxEntries | Where-Object { $_.malformed })
+        $cons = Test-CrossConsistency
+        $issues = @()
+        if ($stateEx.corrupt_count -gt 0) { $issues += "$($stateEx.corrupt_count) linea(s) idempotencia con checksum corrupto" }
+        if ($malformed.Count -gt 0) { $issues += "$($malformed.Count) linea(s) outbox malformada(s)" }
+        foreach ($e in $cons.errors) { $issues += "consistencia: $e" }
+        if ($issues.Count -eq 0) { [void]$checks.Add([ordered]@{ name = 'integrity'; status = 'ok'; detail = "idempotencia=$($stateEx.records.Count) regs, outbox=$($outboxEntries.Count) entries" }) }
+        else { [void]$checks.Add([ordered]@{ name = 'integrity'; status = 'warn'; detail = ($issues -join '; ') }) }
+    } catch {
+        [void]$checks.Add([ordered]@{ name = 'integrity'; status = 'warn'; detail = "integridad no verificable: $_" })
+    }
+
+    # 4. password
+    $pw = Get-CrossPassword
+    if ($pw) { [void]$checks.Add([ordered]@{ name = 'password'; status = 'ok'; detail = "OPENCODE_SERVER_PASSWORD via $($pw.source)" }) }
+    else { [void]$checks.Add([ordered]@{ name = 'password'; status = 'warn'; detail = 'OPENCODE_SERVER_PASSWORD no definida (env ni .env)' }) }
+
+    # 5. server (N3/N5: CI sin server = warn esperado, no error)
+    $isCi = [bool]$env:CI -or [bool]$env:GITHUB_ACTIONS
+    $ep = Resolve-CrossEndpoint -HealthSkip
+    if ($ep.ok) {
+        $h = Test-CrossHealthRaw -Port $ep.port -Password $ep.password
+        if ($h.healthy) { [void]$checks.Add([ordered]@{ name = 'server'; status = 'ok'; detail = "healthy puerto=$($ep.port) via=$($ep.detection_method) version=$($h.version)" }) }
+        else { [void]$checks.Add([ordered]@{ name = 'server'; status = 'warn'; detail = "puerto $($ep.port) responde pero no healthy (status $($h.status))" }) }
+    } else {
+        $ciDetail = if ($isCi) { 'server_unavailable_expected_ci' } else { 'server_unavailable' }
+        [void]$checks.Add([ordered]@{ name = 'server'; status = 'warn'; detail = "${ciDetail}: $($ep.err) ($($ep.hint))"; expected_ci = $isCi })
+    }
+
+    # 6. consistencia
+    try {
+        $cons = Test-CrossConsistency
+        if ($cons.ok -and $cons.warnings.Count -eq 0) { [void]$checks.Add([ordered]@{ name = 'consistencia'; status = 'ok'; detail = 'sin warnings ni errores' }) }
+        elseif ($cons.ok) { [void]$checks.Add([ordered]@{ name = 'consistencia'; status = 'warn'; detail = "$($cons.warnings.Count) warning(s): $($cons.warnings -join '; ')" }) }
+        else { [void]$checks.Add([ordered]@{ name = 'consistencia'; status = 'fail'; detail = "$($cons.errors.Count) error(es): $($cons.errors -join '; ')" }) }
+    } catch {
+        [void]$checks.Add([ordered]@{ name = 'consistencia'; status = 'warn'; detail = "no verificable: $_" })
+    }
+
+    $okCount = @($checks | Where-Object { $_.status -eq 'ok' }).Count
+    $warnCount = @($checks | Where-Object { $_.status -eq 'warn' }).Count
+    $failCount = @($checks | Where-Object { $_.status -eq 'fail' }).Count
+    return @{
+        ok       = ($failCount -eq 0)
+        checks   = @($checks)
+        summary  = @{ ok = $okCount; warn = $warnCount; fail = $failCount }
+        error_count = $failCount
+        warn_count  = $warnCount
+    }
+}
+
+Export-ModuleMember -Function Get-CrossPoll, Get-CrossStatus, Get-CrossReconcile, Get-CrossAvisoSpof, Get-SessionState, Read-EscalatedLog, Read-DlqLog, Find-AuditOutcome, Get-CrossMetrics, Get-PollDiagnostic, Get-CrossDoctorReport

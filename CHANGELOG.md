@@ -9,6 +9,52 @@ mixed current specification with changelog and PowerShell pitfalls).
 
 ## Versions
 
+### v1.12.0 (2026-08-20) — checksums de integridad + `cross doctor` (compatible)
+
+Design origin: external review (GLM-5.3), improvement #5 "Idempotencia
+tolerante a corrupción (checksums)". Plan 43 approved 3/3 CON CAMBIOS by
+advisors (MIMO, NEMOTRON, BIG PICKLE); result verified 3/3 APROBADO.
+
+**Principle:** legacy lines (no checksum) are still parsed identically; only
+lines WITH a checksum are verified. Nothing breaks.
+
+- **`Get-CrossChecksum`** (cross-state) — full SHA256 hex of a string
+  (NEMOTRON-N1: 64 hex, not truncated 16).
+- **`Add-IdempotenciaLine`** — writes format **v1.7**:
+  `msg_id | timestamp | modelo | state | sha256:<64hex>` (SHA256 over the 4
+  canonical fields). Header `## Activo (formato v1.7)`; existing v1.6.1 lines
+  are preserved untouched.
+- **`Read-IdempotenciaLogEx`** — returns `{records, corrupt_lines,
+  corrupt_count}`; detects v1.7 lines whose checksum doesn't match (skips
+  them, lists in `corrupt_lines`), parses legacy lines without checksum.
+- **`Read-IdempotenciaLog`** — still returns the clean records array
+  (API-compatible; no exceptions on corrupt lines).
+- **`Get-MsgState`** — returns last valid record; if ALL entries for a
+  msg_id are corrupt → marker `CORRUPTED_ALL` (NEMOTRON-N2, distinguished
+  from `$null` = no entries); callers that compare against
+  `CLAIMED_BY=`/`PROCESADO`/`SUPERSEDED_BY=` don't match and retry safely.
+- **`Test-CrossConsistency`** — adds `checksum corrupto` warning per corrupt
+  line.
+- **`Repair-CrossIdempotencia`** — non-destructive by default (diagnose
+  only); `-DryRun` reports without touching; `-Rewrite` rewrites without
+  corrupt lines and creates a `.bak` backup first (NEMOTRON-N4). Never
+  deletes automatically.
+- **`Get-CrossDoctorReport`** (cross-diagnostic) — 6 checks: config, paths,
+  integrity, password, server, consistencia. Server unavailable in CI
+  (`$env:CI`/`$env:GITHUB_ACTIONS`) → `warn` with `expected_ci=true`,
+  documented as expected, not error (NEMOTRON-N3/N5).
+- **`cross doctor`** (cross.ps1) — read-only subcommand; respects `--config`;
+  JSON output `{ok, checks[], summary, error_count, warn_count}`.
+- **New test `cross/tests/T-doctor.ps1`** — 27 assertions (round-trip v1.7
+  with 64 hex, legacy parsed, corruption detected/skipped, Get-MsgState
+  tolerance + CORRUPTED_ALL + null, Repair with/without -Rewrite + .bak,
+  consistency warning, doctor schema 6 checks, doctor CLI with broken config).
+- **`T-done.ps1`** — assertion updated to v1.7 PROCESADO with checksum.
+
+Suite result: **613 pass, 0 fail** (32 suites). `cross validate` clean;
+`cross doctor --human` OK. Backup before implementation:
+`backup_v112_20260820_221340.zip`.
+
 ### v1.11.0 (2026-08-20) — improved port discovery (well-known + diag) (compatible)
 
 Design origin: external review (GLM-5.3), improvement #3 "Descubrimiento de

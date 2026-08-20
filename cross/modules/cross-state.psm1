@@ -31,16 +31,47 @@ function Get-OutboxMutex {
     return Get-CrossMutex -Path $Path
 }
 
-function Read-IdempotenciaLog {
+function Get-CrossChecksum {
+    param([string]$Text)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+    $hash = $sha.ComputeHash($bytes)
+    return (($hash | ForEach-Object { $_.ToString('x2') }) -join '')
+}
+
+function Read-IdempotenciaLogEx {
     param([string]$Path = '')
     if (-not $Path) { $Path = Get-IdempotenciaPath }
     $records = New-Object System.Collections.ArrayList
-    if (-not (Test-Path -LiteralPath $Path)) { return @($records) }
+    $corruptLines = New-Object System.Collections.ArrayList
+    if (-not (Test-Path -LiteralPath $Path)) { return @{ records = @($records); corrupt_lines = @($corruptLines); corrupt_count = 0 } }
     $section = ''
     foreach ($line in (Get-Content -LiteralPath $Path)) {
         $trimmed = $line.Trim()
         if (-not $trimmed) { continue }
         if ($trimmed -match '^#+') { $section = ($trimmed -replace '^#+\s*', ''); continue }
+        # formato v1.7: msg_id | timestamp | modelo | state | sha256:<64hex>
+        $m7 = [regex]::Match($trimmed, '^(.+?) \| (.+?) \| ([^|]*) \| (.+?) \| sha256:([0-9a-f]{64})$')
+        if ($m7.Success) {
+            $canonical = "{0} | {1} | {2} | {3}" -f $m7.Groups[1].Value.Trim(), $m7.Groups[2].Value.Trim(), $m7.Groups[3].Value.Trim(), $m7.Groups[4].Value.Trim()
+            $expected = Get-CrossChecksum $canonical
+            if ($expected -ne $m7.Groups[5].Value) {
+                [void]$corruptLines.Add([ordered]@{ msg_id = $m7.Groups[1].Value.Trim(); raw = $trimmed })
+                continue
+            }
+            $state = $m7.Groups[4].Value
+            if ($state -notmatch '^(CLAIMED_BY=|PROCESADO$|SUPERSEDED_BY=)') { continue }
+            [void]$records.Add([ordered]@{
+                msg_id    = $m7.Groups[1].Value.Trim()
+                timestamp = $m7.Groups[2].Value.Trim()
+                modelo    = $m7.Groups[3].Value.Trim()
+                state     = $state
+                section   = $section
+                corrupt   = $false
+            })
+            continue
+        }
+        # formato legacy v1.6.1 (sin checksum)
         $m = [regex]::Match($trimmed, '^(.+?) \| (.+?) \| ([^|]*) \| (.+?)$')
         if (-not $m.Success) { continue }
         $state = $m.Groups[4].Value
@@ -51,16 +82,33 @@ function Read-IdempotenciaLog {
             modelo    = $m.Groups[3].Value.Trim()
             state     = $state
             section   = $section
+            corrupt   = $false
         })
     }
-    return @($records)
+    return @{ records = @($records); corrupt_lines = @($corruptLines); corrupt_count = $corruptLines.Count }
+}
+
+function Read-IdempotenciaLog {
+    param([string]$Path = '')
+    $ex = Read-IdempotenciaLogEx -Path $Path
+    return $ex.records
 }
 
 function Get-MsgState {
     param([string]$MsgId, [string]$Path = '')
     if (-not $Path) { $Path = Get-IdempotenciaPath }
-    $records = @(Read-IdempotenciaLog -Path $Path | Where-Object { $_.msg_id -eq $MsgId })
-    if ($records.Count -eq 0) { return $null }
+    $ex = Read-IdempotenciaLogEx -Path $Path
+    $records = @($ex.records | Where-Object { $_.msg_id -eq $MsgId })
+    if ($records.Count -eq 0) {
+        # NEMOTRON-N2: distinguir "sin entradas" (null) de "todas corruptas"
+        # (marcador CORRUPTED_ALL). Callers que comparan contra CLAIMED_BY=/
+        # PROCESADO/SUPERSEDED_BY= no matchean y reintentan (comportamiento seguro).
+        $corruptFor = @($ex.corrupt_lines | Where-Object { $_.msg_id -eq $MsgId })
+        if ($corruptFor.Count -gt 0) {
+            return [ordered]@{ msg_id = $MsgId; corrupt = $true; state = 'CORRUPTED_ALL'; timestamp = ''; modelo = ''; section = '' }
+        }
+        return $null
+    }
     return $records[$records.Count - 1]
 }
 
@@ -74,12 +122,13 @@ function Add-IdempotenciaLine {
     )
     if (-not $Path) { $Path = Get-IdempotenciaPath }
     $line = "$MsgId | $Timestamp | $Modelo | $State"
+    $line = "$line | sha256:$($(Get-CrossChecksum $line))"
     $dir = Split-Path -Parent $Path
     if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     if (-not (Test-Path -LiteralPath $Path)) {
         $parent = Split-Path -Parent $Path
         if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-        [System.IO.File]::WriteAllText($Path, "# IDEMPOTENCIA`n## Activo (formato v1.6)`n", (New-Object System.Text.UTF8Encoding($false)))
+        [System.IO.File]::WriteAllText($Path, "# IDEMPOTENCIA`n## Activo (formato v1.7)`n", (New-Object System.Text.UTF8Encoding($false)))
     }
     [System.IO.File]::AppendAllText($Path, $line + "`n", (New-Object System.Text.UTF8Encoding($false)))
     return $line
@@ -245,6 +294,10 @@ function Test-CrossConsistency {
 
     if (Test-Path -LiteralPath $StatePath) {
         $section = ''
+        $stateEx = Read-IdempotenciaLogEx -Path $StatePath
+        foreach ($cl in $stateEx.corrupt_lines) {
+            [void]$warnings.Add("checksum corrupto en idempotencia (msg $($cl.msg_id)): $($cl.raw)")
+        }
         foreach ($line in (Get-Content -LiteralPath $StatePath)) {
             $trimmed = $line.Trim()
             if (-not $trimmed) { continue }
@@ -537,4 +590,38 @@ function Write-AuditEntry {
     return Add-CrossLogLine -Path $AuditPath -Line $row
 }
 
-Export-ModuleMember -Function Get-StateTimestamp, Get-IdempotenciaPath, Get-OutboxPath, Get-OutboxMutex, Read-IdempotenciaLog, Get-MsgState, Add-IdempotenciaLine, New-CrossClaim, New-CrossRelease, New-CrossDone, Read-OutboxLog, Get-OutboxEntry, Test-CrossConsistency, Update-OutboxLine, Set-OutboxEstado, Renew-CrossLease, Set-OutboxAttempt, Add-OutboxEntry, Add-CrossLogLine, Write-AuditEntry, Invoke-CrossAutoSweep
+function Repair-CrossIdempotencia {
+    param(
+        [string]$Path = '',
+        [switch]$DryRun,
+        [switch]$Rewrite
+    )
+    if (-not $Path) { $Path = Get-IdempotenciaPath }
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return @{ ok = $true; corrupt_lines = @(); rewritten = $false; detail = 'archivo no existe: nada que reparar' }
+    }
+    $stateEx = Read-IdempotenciaLogEx -Path $Path
+    if ($stateEx.corrupt_count -eq 0) {
+        return @{ ok = $true; corrupt_lines = @(); rewritten = $false; detail = 'sin lineas corruptas' }
+    }
+    if (-not $Rewrite) {
+        # N4: sin -Rewrite solo diagnostica; -DryRun reporta explicitamente sin tocar.
+        $mode = if ($DryRun) { 'dry-run' } else { 'diagnostico' }
+        return @{ ok = $false; corrupt_lines = @($stateEx.corrupt_lines); rewritten = $false; detail = "${mode}: $($stateEx.corrupt_count) linea(s) corrupta(s); usar -Rewrite para reescribir con backup .bak" }
+    }
+    # Rewrite: backup previo + reescritura sin las lineas corruptas.
+    $bak = "$Path.bak"
+    try {
+        Copy-Item -LiteralPath $Path -Destination $bak -Force
+        $allLines = Get-Content -LiteralPath $Path
+        $corruptSet = @{}
+        foreach ($cl in $stateEx.corrupt_lines) { $corruptSet[$cl.raw] = $true }
+        $kept = @($allLines | Where-Object { -not $corruptSet.ContainsKey($_.Trim()) })
+        [System.IO.File]::WriteAllText($Path, (($kept -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+        return @{ ok = $true; corrupt_lines = @($stateEx.corrupt_lines); rewritten = $true; backup = $bak; detail = "$($stateEx.corrupt_count) linea(s) corrupta(s) eliminadas" }
+    } catch {
+        return @{ ok = $false; corrupt_lines = @($stateEx.corrupt_lines); rewritten = $false; detail = "ERROR al reescribir: $_" }
+    }
+}
+
+Export-ModuleMember -Function Get-StateTimestamp, Get-IdempotenciaPath, Get-OutboxPath, Get-OutboxMutex, Read-IdempotenciaLog, Read-IdempotenciaLogEx, Get-MsgState, Add-IdempotenciaLine, New-CrossClaim, New-CrossRelease, New-CrossDone, Read-OutboxLog, Get-OutboxEntry, Test-CrossConsistency, Update-OutboxLine, Set-OutboxEstado, Renew-CrossLease, Set-OutboxAttempt, Add-OutboxEntry, Add-CrossLogLine, Write-AuditEntry, Invoke-CrossAutoSweep, Repair-CrossIdempotencia

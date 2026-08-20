@@ -45,7 +45,7 @@ Reset-State
 $r = Get-Json (Invoke-CrossCli @('done', '--state-file', $script:StateFile, '--msg', $m1, '--owner', $A))
 Assert-True ($r.ok) 'done by owner ok' $r.err
 $content = Get-Content -LiteralPath $script:StateFile -Raw
-Assert-True ($content -match ' \| PROCESADO$') 'PROCESADO written' ''
+Assert-True ($content -match ' \| PROCESADO \| sha256:[0-9a-f]{64}$') 'PROCESADO written (formato v1.7 con checksum)' ''
 Assert-True ((Count-MsgLines $m1) -eq 2) '2 lines (claim + done)' (Count-MsgLines $m1)
 $r = Get-Json (Invoke-CrossCli @('done', '--state-file', $script:StateFile, '--msg', $m1, '--owner', $A))
 Assert-True ($r.ok -and $r.already) 'done repeated idempotent' $r.err

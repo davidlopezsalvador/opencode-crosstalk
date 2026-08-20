@@ -424,6 +424,12 @@ switch ($Command) {
         $r = New-Result -Ok $v.ok -Code $(if ($v.ok) { 0 } else { 2 }) -Data @{ warnings = $v.warnings; errors = $v.errors; warning_count = $v.warnings.Count; error_count = $v.errors.Count } -Cmd 'validate'
         Out-Result $r 'validate' -Watch $watch
     }
+    'doctor' {
+        $watch = [System.Diagnostics.Stopwatch]::StartNew()
+        $d = Get-CrossDoctorReport -ConfigPath $ConfigPath
+        $r = New-Result -Ok $d.ok -Code $(if ($d.ok) { 0 } else { 2 }) -Data @{ checks = $d.checks; summary = $d.summary; error_count = $d.error_count; warn_count = $d.warn_count } -Cmd 'doctor'
+        Out-Result $r 'doctor' -Watch $watch
+    }
     'send' {
         $watch = [System.Diagnostics.Stopwatch]::StartNew()
         $msg = [string]$flags['msg']
