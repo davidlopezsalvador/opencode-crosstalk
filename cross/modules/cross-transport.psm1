@@ -1,8 +1,12 @@
 Set-StrictMode -Version 2.0
 
+if (-not (Get-Command Get-CrossPlatform -ErrorAction SilentlyContinue)) {
+    Import-Module (Join-Path $PSScriptRoot 'cross-ipc.psm1') -Force -DisableNameChecking
+}
+
 $script:Config = $null
-$script:PortCache = Join-Path $env:TEMP 'cross-port.cache'
-$script:EnvFile = Join-Path $env:USERPROFILE '.config\opencode\.env'
+$script:PortCache = Join-Path (Get-CrossTempDir) 'cross-port.cache'
+$script:EnvFile = Get-CrossEnvFile
 
 function Import-CrossConfig {
     param([string]$ConfigPath = '')
@@ -118,7 +122,31 @@ function Get-CrossPortFromLog {
         $config = Get-CrossConfig
         if ($config.desktop_logs_dir) { $logsDir = Expand-Path $config.desktop_logs_dir }
     }
-    if (-not $logsDir -or -not (Test-Path -LiteralPath $logsDir)) { return $null }
+    if (-not $logsDir -or -not (Test-Path -LiteralPath $logsDir)) {
+        # Fallback Unix (NEMOTRON-R5): equivalentes de APPDATA y del log de
+        # OpenCode en Linux/macOS. Retorna $null limpio si no hay nada
+        # (BIG PICKLE-R5: sin warnings ruidosos).
+        $platform = Get-CrossPlatform
+        if ($platform -eq [CrossPlatform]::Unix) {
+            $candidates = @(
+                (Join-Path (Get-CrossConfigDir) 'desktop/logs'),
+                (Join-Path $env:HOME '.local/share/opencode/log')
+            )
+            foreach ($c in $candidates) {
+                if (-not $c -or -not (Test-Path -LiteralPath $c)) { continue }
+                $latest = Get-ChildItem -LiteralPath $c -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                if (-not $latest) { continue }
+                $mainLog = Join-Path $latest.FullName 'main.log'
+                if (-not (Test-Path -LiteralPath $mainLog)) { continue }
+                try {
+                    $content = Get-Content -LiteralPath $mainLog -Raw
+                    $m = [regex]::Match($content, "server ready.*url: 'http://127\.0\.0\.1:(\d+)'")
+                    if ($m.Success) { return [int]$m.Groups[1].Value }
+                } catch {}
+            }
+        }
+        return $null
+    }
     $latest = Get-ChildItem -LiteralPath $logsDir -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $latest) { return $null }
     $mainLog = Join-Path $latest.FullName 'main.log'

@@ -3,6 +3,9 @@ Set-StrictMode -Version 2.0
 if (-not (Get-Command Get-CrossConfig -ErrorAction SilentlyContinue)) {
     Import-Module (Join-Path $PSScriptRoot 'cross-transport.psm1') -Force -DisableNameChecking
 }
+if (-not (Get-Command Get-CrossMutex -ErrorAction SilentlyContinue)) {
+    Import-Module (Join-Path $PSScriptRoot 'cross-ipc.psm1') -Force -DisableNameChecking
+}
 
 function Get-StateTimestamp {
     return (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -23,8 +26,9 @@ function Get-OutboxPath {
 
 function Get-OutboxMutex {
     param([Parameter(Mandatory=$true)][string]$Path)
-    $hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($Path))).Replace('-', '').Substring(0, 24)
-    return New-Object System.Threading.Mutex($false, "Global\CrossOutbox_$hash")
+    # Delega en la capa IPC multiplataforma (v1.10); en Windows el
+    # comportamiento es identico (mismo hash SHA256, mismo prefijo Global\).
+    return Get-CrossMutex -Path $Path
 }
 
 function Read-IdempotenciaLog {
@@ -533,4 +537,4 @@ function Write-AuditEntry {
     return Add-CrossLogLine -Path $AuditPath -Line $row
 }
 
-Export-ModuleMember -Function Get-StateTimestamp, Get-IdempotenciaPath, Get-OutboxPath, Read-IdempotenciaLog, Get-MsgState, Add-IdempotenciaLine, New-CrossClaim, New-CrossRelease, New-CrossDone, Read-OutboxLog, Get-OutboxEntry, Test-CrossConsistency, Update-OutboxLine, Set-OutboxEstado, Renew-CrossLease, Set-OutboxAttempt, Add-OutboxEntry, Add-CrossLogLine, Write-AuditEntry, Invoke-CrossAutoSweep
+Export-ModuleMember -Function Get-StateTimestamp, Get-IdempotenciaPath, Get-OutboxPath, Get-OutboxMutex, Read-IdempotenciaLog, Get-MsgState, Add-IdempotenciaLine, New-CrossClaim, New-CrossRelease, New-CrossDone, Read-OutboxLog, Get-OutboxEntry, Test-CrossConsistency, Update-OutboxLine, Set-OutboxEstado, Renew-CrossLease, Set-OutboxAttempt, Add-OutboxEntry, Add-CrossLogLine, Write-AuditEntry, Invoke-CrossAutoSweep

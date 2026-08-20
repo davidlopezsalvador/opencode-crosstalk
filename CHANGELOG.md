@@ -9,6 +9,43 @@ mixed current specification with changelog and PowerShell pitfalls).
 
 ## Versions
 
+### v1.10.0 (2026-08-20) — cross-platform IPC abstraction (compatible)
+
+Design origin: external review (GLM-5.3, shared Z.ai chat), improvement #2
+"Abstracción IPC multiplataforma" (alta prioridad). Plan 41 approved 3/3 CON
+CAMBIOS by advisors (MIMO, NEMOTRON, BIG PICKLE); result verified 3/3 APROBADO.
+
+**Principle:** business modules (state, delivery, diagnostic, action) do NOT
+change; a low-level IPC layer + path helpers is introduced. Windows behavior
+is byte-identical (same SHA256 hash, same `Global\` mutex prefix, same paths);
+Unix (Linux/macOS/WSL) is unlocked.
+
+- **New module `cross/modules/cross-ipc.psm1`** — `CrossPlatform` enum;
+  `Get-CrossPlatform` (PS 5.1 via `$PSVersionTable.PSEdition`, Core via
+  `$IsWindows/$IsLinux/$IsMacOS`, WSL→Unix, result cached in `$script:Platform`);
+  `Get-CrossConfigDir` (Windows `USERPROFILE\.config\opencode`; Unix
+  `XDG_CONFIG_HOME/opencode` else `~/.config/opencode`); `Get-CrossEnvFile`;
+  `Get-CrossTempDir` (TEMP/TMP, TMPDIR, `/tmp`); `Get-CrossMutex` (Windows
+  `System.Threading.Mutex` identical; Unix `CrossFileLock` class with
+  `FileStream+FileShare.None+FileOptions.DeleteOnClose`, same
+  `.WaitOne(ms)/.ReleaseMutex()` API, 30s retry timeout; documented advisory
+  lock, not POSIX flock, and non-reentrant).
+- **`cross-transport.psm1` minimal changes** — import of cross-ipc;
+  `$script:PortCache` via `Get-CrossTempDir`; `$script:EnvFile` via
+  `Get-CrossEnvFile`; `Get-CrossPortFromLog` Unix fallbacks
+  (`<configdir>/desktop/logs`, `~/.local/share/opencode/log`) returning clean
+  `$null` without noisy warnings.
+- **`cross-state.psm1` minimal changes** — `Get-OutboxMutex` delegates to
+  `Get-CrossMutex` (same signature/hash) and is now exported.
+- **New test `cross/tests/T-ipc.ps1`** — 12 assertions: platform value +
+  cache, config dir/env file per platform, mutex round-trip (WaitOne/
+  ReleaseMutex/reacquire), cross-process contention (Start-Job blocks while
+  held, acquires after release; Unix file-lock timeout semantics), regression
+  `Get-OutboxMutex` + `Test-CrossConsistency`.
+
+Suite result: **567 pass, 0 fail** (30 suites). `cross validate` clean.
+Backup before implementation: `backup_v191_20260820_200820.zip`.
+
 ### v1.9.0 (2026-08-20) — envelope JSON v2, Fase 1 (compatible)
 
 Design origin: external review (GLM-5.3, shared Z.ai chat "Revisión Repositorio
