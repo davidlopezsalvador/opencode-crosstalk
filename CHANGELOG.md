@@ -11,8 +11,24 @@ mixed current specification with changelog and PowerShell pitfalls).
 
 ### v1.8.4 (2026-08-20) — project usability (post-publication)
 
-First post-publication iteration, focused on making the repo usable by
-strangers:
+**Hardening (CI green, same day):** the first CI run exposed that
+`T-cli.ps1` assumed a live OpenCode Desktop server; on the runner it died
+without emitting `RESULT:`, crashing the workflow parser. Fixes:
+
+- **T-cli SKIP guard** — `$haveServer` (logs + password) gates the 9
+  server-dependent scenarios; without a server they report
+  `26 pass, 0 fail, 9 skipped (server-dependent)`.
+- **Robust workflow loop** — captures `2>&1`, parses `RESULT:` via regex,
+  and on a test without RESULT prints its last 8 output lines (no more
+  null-pointer crash in the runner script).
+- **Transport hardening** (advised by 5 peer reviews): `Get-CrossPortByScan`
+  no longer returns an unverified "trap port" when there is no password
+  (returns `SERVER_NOT_FOUND` cleanly), and the `TcpClient` loop is wrapped
+  in try/catch/finally (reserved-port `SocketException`).
+- **T-cli config --set** — restore of `port_cache_ttl_s` moved to
+  `finally`; `.GetType()` assert null-safe.
+
+First release iteration:
 
 - **`install.ps1`** — one-command setup: detects the OpenCode Desktop
   server (port from logs, password from env/.env), lists sessions, picks

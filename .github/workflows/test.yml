@@ -17,13 +17,14 @@ jobs:
         run: |
           $totalP = 0; $totalF = 0
           Get-ChildItem cross\tests\T-*.ps1 | ForEach-Object {
-            $out = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $_.FullName 2>$null
-            $res = ($out | Select-String "RESULT" | Select-Object -Last 1).ToString()
-            if ($res -match '(\d+) pass, (\d+) fail') {
+            $out = (powershell.exe -NoProfile -ExecutionPolicy Bypass -File $_.FullName 2>&1) -join "`n"
+            if ($out -match 'RESULT: (\d+) pass, (\d+) fail') {
               $totalP += [int]$Matches[1]; $totalF += [int]$Matches[2]
-              Write-Host ("{0}: {1}" -f $_.Name, $res)
+              Write-Host ("{0}: RESULT: {1} pass, {2} fail" -f $_.Name, $Matches[1], $Matches[2])
             } else {
-              Write-Host ("{0}: NO RESULT" -f $_.Name)
+              Write-Host ("{0}: NO RESULT - output:" -f $_.Name)
+              ($out -split "`n") | Select-Object -Last 8 | ForEach-Object { Write-Host ("    {0}" -f $_) }
+              $totalF++
             }
           }
           Write-Host ("TOTAL: {0} pass, {1} fail" -f $totalP, $totalF)

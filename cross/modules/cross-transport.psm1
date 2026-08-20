@@ -136,12 +136,18 @@ function Get-CrossPortByScan {
     $lo = $ScanRange[0]; $hi = $ScanRange[1]
     $candidates = New-Object System.Collections.ArrayList
     for ($p = $lo; $p -le $hi; $p++) {
-        $tcp = New-Object System.Net.Sockets.TcpClient
-        $task = $tcp.ConnectAsync('127.0.0.1', $p)
-        if ($task.Wait(120)) {
-            if ($tcp.Connected) { [void]$candidates.Add($p) }
+        $tcp = $null
+        try {
+            $tcp = New-Object System.Net.Sockets.TcpClient
+            $task = $tcp.ConnectAsync('127.0.0.1', $p)
+            if ($task.Wait(120)) {
+                if ($tcp.Connected) { [void]$candidates.Add($p) }
+            }
+        } catch {
+            # puerto reservado / socket error: skip este puerto
+        } finally {
+            if ($tcp) { $tcp.Close() }
         }
-        $tcp.Close()
         if ($candidates.Count -ge 20) { break }
     }
     $pw = Get-CrossPassword
@@ -150,7 +156,9 @@ function Get-CrossPortByScan {
             $h = Test-CrossHealthRaw -Port $p -Password $pw.value
             if ($h.healthy) { return $p }
         } else {
-            return $p
+            # sin password no se puede verificar health: no devolver puertos trampa,
+            # dejar que Resolve-CrossEndpoint retorne SERVER_NOT_FOUND limpio
+            break
         }
     }
     return $null
