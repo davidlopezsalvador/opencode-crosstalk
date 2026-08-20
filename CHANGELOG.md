@@ -9,6 +9,43 @@ mixed current specification with changelog and PowerShell pitfalls).
 
 ## Versions
 
+### v1.9.0 (2026-08-20) — envelope JSON v2, Fase 1 (compatible)
+
+Design origin: external review (GLM-5.3, shared Z.ai chat "Revisión Repositorio
+GitHub"), improvement #1 "Sobre estructurado JSON" (alta prioridad). Human
+approved scope: ONLY Fase 1 (v1.9). Plan 40 approved 3/3 CON CAMBIOS by
+advisors; result verified 2/3 APROBADO (MIMO, NEMOTRON); ROUTER PENDIENTE
+(rate limit 429, reset 2026-08-21 02:00 local).
+
+**Principle:** the v1 envelope (`[msg_id=... | ...]`, section 12.1) is NOT
+modified; the v2 envelope travels as an ADDITIONAL line `ENVELOPE-V2: {json}`
+in the message body; the parser accepts v2 first and falls back to v1.
+Backward compatible: existing tests and advisors keep working unchanged.
+
+- **New module `cross/modules/cross-envelope.psm1`** — `New-CrossEnvelope`
+  (JSON v2 message), `New-CrossAckJson`/`New-CrossNackJson` (structured
+  ACK/NACK), `Format-CrossEnvelopeV2` (`ENVELOPE-V2: ` prefix, `ConvertTo-AsciiSafe`
+  applied internally), `Parse-CrossEnvelope` (line-based `ENVELOPE-V2:` or pure
+  JSON; validates `v=2`, `type` in {message,ack,nack}, soft-validates
+  `requires_ack` bool and ISO8601 `timestamp`; failure → `valid=$false` →
+  v1 fallback), `ConvertTo-CrossV1` (v2 → equivalent v1 text, tool for Fase 2+).
+- **`cross-delivery.psm1` minimal changes** — import of the new module at the
+  top (before use); `New-CrossDelivery` appends the v2 line to the body after
+  the v1 envelope; `Parse-CrossAckText` tries v2 first (ack/nack extract
+  token/emisor/modelo/razon/msg_id/run_id; `type=message` is NOT a response),
+  falling back to the existing v1 logic intact.
+- **New test `cross/tests/T-contract.ps1`** — 39 assertions: round-trip v2
+  message/ack/nack, mixed body, pure JSON, `type=message` ignored, v1 fallback
+  regression (E1, ACK-PROTOCOLO/NACK-PROTOCOLO, NACK 3-4/4-7 seg), invalid
+  `ENVELOPE-V2:` (bad JSON, `v=1`, unknown type, non-bool `requires_ack`,
+  non-ISO `timestamp`) → fallback, v2 precedence over v1, `ConvertTo-CrossV1`
+  round-trip.
+
+Suite result: **554 pass, 1 fail** (29 suites; T-poll 28/1 in-suite — known
+transient TCP scan failure, passes aislado 29/0; NOT a regression). T-delivery
+66/0 no regressions. `cross validate` clean (0 errors, 0 warnings). Backup
+before implementation: `backup_v184_20260820_182309.zip`.
+
 ### v1.8.4 (2026-08-20) — project usability (post-publication)
 
 **Hardening (CI green, same day):** the first CI run exposed that

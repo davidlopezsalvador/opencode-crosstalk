@@ -9,6 +9,9 @@ if (-not (Get-Command Get-CrossConfig -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command Read-OutboxLog -ErrorAction SilentlyContinue)) {
     Import-Module (Join-Path $PSScriptRoot 'cross-state.psm1') -Force -DisableNameChecking
 }
+if (-not (Get-Command Parse-CrossEnvelope -ErrorAction SilentlyContinue)) {
+    Import-Module (Join-Path $PSScriptRoot 'cross-envelope.psm1') -Force -DisableNameChecking
+}
 
 function Format-CrossEnvelope {
     param(
@@ -35,6 +38,28 @@ function Parse-CrossAckText {
     param([AllowEmptyString()][string]$Text = '')
     $result = @{ ack = $false; nack = $false; protocolo = $false; token = ''; emisor = ''; modelo = ''; razon = ''; msg_id = ''; run_id = ''; raw = $Text }
     if (-not $Text) { return $result }
+    # v2 primero (sobre JSON estructurado, Fase 1 v1.9): si el texto trae un
+    # envelope v2 valido (ENVELOPE-V2: {json} o JSON puro), prevalece sobre v1.
+    $v2 = Parse-CrossEnvelope -Text $Text
+    if ($v2.valid) {
+        if ($v2.type -eq 'ack') {
+            $result.ack = $true
+            $result.token = $v2.token
+            $result.emisor = $v2.emitter
+            $result.modelo = $v2.model
+            $result.msg_id = $v2.msg_id
+            $result.run_id = $v2.run_id
+        } elseif ($v2.type -eq 'nack') {
+            $result.nack = $true
+            $result.token = $v2.token
+            $result.emisor = $v2.emitter
+            $result.modelo = $v2.model
+            $result.razon = $v2.reason
+            $result.msg_id = $v2.msg_id
+            $result.run_id = $v2.run_id
+        }
+        return $result
+    }
     $m = [regex]::Match($Text, '(?<!\S)NACK-PROTOCOLO:([^\s]+)')
     if ($m.Success) {
         $result.protocolo = $true
@@ -271,6 +296,8 @@ function New-CrossDelivery {
 
     $envelope = Format-CrossEnvelope -MsgId $MsgId -RunId $RunId -Token $Token -RequiereAck $RequiereAck -Lease $Lease -Sucesor $Sucesor
     $body = ConvertTo-AsciiSafe $envelope
+    $v2line = Format-CrossEnvelopeV2 -MsgId $MsgId -RunId $RunId -Token $Token -RequiresAck $RequiereAck -Lease $Lease -Successor $Sucesor -Text $Text
+    $body += "`n" + $v2line
     if ($Text) { $body += "`n" + (ConvertTo-AsciiSafe $Text) }
 
     function Test-RetryableStatus([int]$st) {

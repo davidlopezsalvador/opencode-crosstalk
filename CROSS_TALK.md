@@ -1335,6 +1335,14 @@ the number of DELIVERIES of the logical message (`msg_id`). Rules:
 > `msg_id` (retransmit or reconcile the logical message). Do not mix them:
 > sending `sigue` is not retransmitting, and retransmitting without context does not resume.
 
+> **ENVELOPE-V2 (v1.9.0, Fase 1):** since v1.9.0 the engine adds a second,
+> structured line to the message body — `ENVELOPE-V2: {json}` (v2 envelope,
+> see `cross/modules/cross-envelope.psm1`). The v1 envelope above is
+> UNCHANGED and remains the canonical format; v2 is an additional, validated
+> representation (`v=2`, `type` in {message,ack,nack}). `Parse-CrossAckText`
+> tries v2 first and falls back to v1, so old advisors and new ones interoperate.
+> Fase 2 (v1.10) will deprecate v1; Fase 3 (v2.0) will make v2 exclusive.
+
 ### 12.2 Durable outbox (BEFORE sending)
 
 Before calling `prompt_async`, the **sender** writes a line in
