@@ -34,8 +34,22 @@ function Format-CrossEnvelope {
     return "[$($parts -join ' | ')]"
 }
 
+# F4 (v1.16): v1 deprecation - once-per-process warning + usage counter.
+# Full removal planned for v1.17 (migrate Find-AckInList and tests to Parse-CrossEnvelope).
+$script:V1ParseWarned = $false
+$script:V1ParseCount = 0
+
+function Get-CrossV1Usage {
+    return @{ count = $script:V1ParseCount; removed_in = 'v1.17' }
+}
+
 function Parse-CrossAckText {
     param([AllowEmptyString()][string]$Text = '')
+    $script:V1ParseCount++
+    if (-not $script:V1ParseWarned) {
+        $script:V1ParseWarned = $true
+        Write-Warning 'DEPRECATED: Parse-CrossAckText (v1 format) will be removed in v1.17 - migrate to Parse-CrossEnvelope'
+    }
     $result = @{ ack = $false; nack = $false; protocolo = $false; token = ''; emisor = ''; modelo = ''; razon = ''; msg_id = ''; run_id = ''; raw = $Text }
     if (-not $Text) { return $result }
     # v2 primero (sobre JSON estructurado, Fase 1 v1.9): si el texto trae un
@@ -225,6 +239,7 @@ function New-CrossDelivery {
         [string]$OutboxPath = '',
         [int]$AckTimeoutSec = 120,
         [int]$MaxAttempts = 2,
+        [int]$MaxTotalWaitSec = 600,
         [int]$InitialAttempt = 0,
         [int]$BackoffSec = 2,
         [int]$Port = 0,
@@ -242,6 +257,7 @@ function New-CrossDelivery {
     $cfg = Get-CrossConfig
     if (-not $MySessionId) { $MySessionId = [string]$cfg.my_session_id }
     if ($AckTimeoutSec -le 0) { $AckTimeoutSec = 120 }
+    if ($MaxTotalWaitSec -le 0) { $MaxTotalWaitSec = 600 }   # F5: hard total cap
 
     $port = $Port
     $password = $Password
@@ -315,7 +331,19 @@ function New-CrossDelivery {
     $attempt = [int]$InitialAttempt
     $sentAt = Get-Date
     $ack = $null
+    # F5: ABSOLUTE deadline counted from here (lease renewals count toward the
+    # budget, they do not reset it).
+    $totalDeadline = (Get-Date).AddSeconds($MaxTotalWaitSec)
+    function Enter-DlqTotalTimeout {
+        [void](Set-OutboxEstado -MsgId $MsgId -Estado 'DLQ' -Path $OutboxPath)
+        $ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $dlqPath = Join-Path (Split-Path -Parent $OutboxPath) 'dlq-mensajes.md'
+        $line = "[$ts] DLQ | $MsgId | para=$Dest | de=$MySessionId | reintentos=$([Math]::Max(0, $attempt - 1)) | ESTADO=SIN RECOGER | flag=TOTAL_TIMEOUT | 'total wait budget ${MaxTotalWaitSec}s exhausted'"
+        [void](Add-CrossLogLine -Path $dlqPath -Line $line)
+        return @{ ok = $false; err = 'TOTAL_TIMEOUT'; reason_code = 'TOTAL_TIMEOUT'; detail = "total wait budget ($($MaxTotalWaitSec)s) exhausted"; state = 'DLQ'; flag = 'TOTAL_TIMEOUT'; attempt = $attempt }
+    }
     while ($attempt -lt $MaxAttempts) {
+        if ((Get-Date) -ge $totalDeadline) { return Enter-DlqTotalTimeout }
         $attempt++
         $renewed = $false
         [void](Set-OutboxAttempt -MsgId $MsgId -Attempt $attempt -Path $OutboxPath)
@@ -324,11 +352,11 @@ function New-CrossDelivery {
 
         if ($st -eq 404) {
             [void](Set-OutboxEstado -MsgId $MsgId -Estado 'EXPIRADO' -Path $OutboxPath)
-            return @{ ok = $false; err = 'DEST_NOT_FOUND'; reason_code = 'NACK_DEST_NOT_FOUND'; detail = "dest $Dest devolvio HTTP 404"; state = 'EXPIRADO'; http_status = $st; attempt = $attempt }
+            return @{ ok = $false; err = 'DEST_NOT_FOUND'; reason_code = 'NACK_DEST_NOT_FOUND'; detail = "dest $Dest returned HTTP 404"; state = 'EXPIRADO'; http_status = $st; attempt = $attempt }
         }
         if ($st -eq 401 -or $st -eq 403) {
             [void](Set-OutboxEstado -MsgId $MsgId -Estado 'EXPIRADO' -Path $OutboxPath)
-            return @{ ok = $false; err = 'AUTH_FAILED'; reason_code = 'NACK_CONFIG_ERROR'; detail = "HTTP $st autenticando ante el servidor"; state = 'EXPIRADO'; http_status = $st; attempt = $attempt }
+            return @{ ok = $false; err = 'AUTH_FAILED'; reason_code = 'NACK_CONFIG_ERROR'; detail = "HTTP $st authenticating with server"; state = 'EXPIRADO'; http_status = $st; attempt = $attempt }
         }
         if ($st -lt 200 -or $st -ge 300) {
             if ((Test-RetryableStatus $st) -and $attempt -lt $MaxAttempts) {
@@ -346,12 +374,12 @@ function New-CrossDelivery {
             return @{ ok = $true; state = 'CONFIRMADO'; delivered = $true; ack = $false; attempt = $attempt; http_status = $st; ack_latency_ms = 0 }
         }
         if ($NoWait) {
-            return @{ ok = $true; state = 'PENDING'; delivered = $true; ack = $false; no_wait = $true; detail = 'entregado sin esperar ACK (--no-wait)'; attempt = $attempt; http_status = $st; ack_latency_ms = 0 }
+            return @{ ok = $true; state = 'PENDING'; delivered = $true; ack = $false; no_wait = $true; detail = 'delivered without waiting for ACK (--no-wait)'; attempt = $attempt; http_status = $st; ack_latency_ms = 0 }
         }
 
         while ($true) {
             $deadline = (Get-Date).AddSeconds($AckTimeoutSec)
-            while ((Get-Date) -lt $deadline) {
+            while (((Get-Date) -lt $deadline) -and ((Get-Date) -lt $totalDeadline)) {
                 $newMsgs = Read-NewMessages
                 $ack = Find-AckInList $newMsgs $Token
                 if ($ack) { break }
@@ -366,6 +394,7 @@ function New-CrossDelivery {
                 [void](Set-OutboxEstado -MsgId $MsgId -Estado 'NACKED' -Path $OutboxPath)
                 return @{ ok = $false; err = 'NACK'; reason = $ack.reason; reason_code = $ack.reason; detail = "destination responded NACK ($($ack.reason))"; state = 'NACKED'; attempt = $attempt; nack_msg_id = $ack.msg_id; nack_run_id = $ack.run_id }
             }
+            if ((Get-Date) -ge $totalDeadline) { return Enter-DlqTotalTimeout }
             $growing = Get-DestGrowing
             if ($growing -and -not $renewed) {
                 $renewed = $true
@@ -441,4 +470,4 @@ function Write-CrossDeliveryLog {
     return $line
 }
 
-Export-ModuleMember -Function Format-CrossEnvelope, Parse-CrossAckText, Test-SessionGrowing, Find-CrossOutboxPending, New-CrossDelivery, Write-CrossDeliveryLog
+Export-ModuleMember -Function Format-CrossEnvelope, Parse-CrossAckText, Get-CrossV1Usage, Test-SessionGrowing, Find-CrossOutboxPending, New-CrossDelivery, Write-CrossDeliveryLog

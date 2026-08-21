@@ -76,10 +76,10 @@ Write-Host "== T-doctor: Get-CrossDoctorReport schema =="
 $d = Get-CrossDoctorReport
 Assert-True ($null -ne $d) 'report devuelve objeto' ($null -ne $d)
 Assert-True ($d.ok -is [bool]) 'ok es bool' $d.ok
-Assert-True (@($d.checks).Count -eq 6) '6 checks' @($d.checks).Count
+Assert-True (@($d.checks).Count -eq 7) '7 checks (v1.16: + v1_deprecation)' @($d.checks).Count
 Assert-True ($d.summary.fail -eq $d.error_count) 'summary.fail == error_count' "$($d.summary.fail) vs $($d.error_count)"
 $names = @($d.checks | ForEach-Object { $_.name })
-Assert-True (($names -join ',') -eq 'config,paths,integrity,password,server,consistencia') 'nombres de checks' ($names -join ',')
+Assert-True (($names -join ',') -eq 'config,v1_deprecation,paths,integrity,password,server,consistencia') 'check names (v1.16)' ($names -join ',')
 
 Write-Host "== T-doctor: cross doctor CLI con config rota =="
 $badCfg = Join-Path $tmpDir 'cross.config.json'

@@ -246,6 +246,23 @@ $json2 = @(Get-Content -LiteralPath $dl | ForEach-Object { $_ | ConvertFrom-Json
 Assert-True ($json2.Count -ge 2) 'delivery_log append-only (2 lines)' $json2.Count
 Assert-True ($json2[1].msg_id -eq 'msg_log2' -and $json2[1].state -eq 'EXPIRADO') '2nd line correct' ($json2[1].msg_id)
 
+# == F5: hard total cap (TOTAL_TIMEOUT -> DLQ, v1.16) =========================
+Write-Host "== T-delivery: F5 MaxTotalWaitSec =="
+New-Fixture
+$dlqFile = Join-Path (Split-Path -Parent $script:OutboxFile) 'dlq-mensajes.md'
+if (Test-Path -LiteralPath $dlqFile) { Remove-Item -LiteralPath $dlqFile -Force }
+Set-FixtureContent -MsgId 'msg_f5tt'
+$res5 = New-CrossDelivery -MsgId 'msg_f5tt' -Dest 'ses_X' -Text 'hola' -Token 'T5' `
+    -OutboxPath $script:OutboxFile -AckTimeoutSec 2 -MaxAttempts 2 -MaxTotalWaitSec 3 `
+    -SendFn { param($s,$b) @{ status = 204; body = '' } } -ReadFn { param($s) @() } -GrowingFn { $true }
+Assert-True ($res5.ok -eq $false -and $res5.err -eq 'TOTAL_TIMEOUT') 'F5 err TOTAL_TIMEOUT' "$($res5.err)"
+Assert-True ($res5.state -eq 'DLQ' -and $res5.flag -eq 'TOTAL_TIMEOUT') 'F5 state=DLQ flag=TOTAL_TIMEOUT' "$($res5.state)|$($res5.flag)"
+$outboxLine5 = @(Get-Content -LiteralPath $script:OutboxFile | Where-Object { $_ -match 'msg_f5tt' }) | Select-Object -Last 1
+Assert-True ($outboxLine5 -match 'ESTADO=DLQ') 'F5 outbox ESTADO=DLQ' $outboxLine5
+Assert-True (Test-Path -LiteralPath $dlqFile) 'F5 dlq-mensajes.md created'
+$dlqLine5 = Get-Content -LiteralPath $dlqFile | Where-Object { $_ -match 'msg_f5tt' } | Select-Object -First 1
+Assert-True ($dlqLine5 -match 'flag=TOTAL_TIMEOUT') 'F5 DLQ line has TOTAL_TIMEOUT flag' $dlqLine5
+
 Write-Host ""
 Write-Host ("RESULT: {0} pass, {1} fail" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

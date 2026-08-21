@@ -21,15 +21,32 @@ function Write-CrossDiag {
     try {
         [System.Console]::Error.WriteLine("[cross-diag] $($Level.ToUpper()) $Message")
     } catch {
-        # diag es best-effort
+        # diag is best-effort
     }
+}
+
+# F3 (v1.16): resolve curl cross-platform. Windows: curl.exe (built-in Win10+).
+# Unix: curl. Cached after first resolution.
+$script:CurlCmd = $null
+
+function Get-CrossCurlCommand {
+    param([switch]$NoCache)
+    if (-not $NoCache -and $script:CurlCmd) { return $script:CurlCmd }
+    $isWindowsHost = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+    $candidates = if ($isWindowsHost) { @('curl.exe', 'curl') } else { @('curl', 'curl.exe') }
+    foreach ($cand in $candidates) {
+        if (Get-Command $cand -ErrorAction SilentlyContinue) {
+            $script:CurlCmd = $cand
+            return $cand
+        }
+    }
+    $hint = if ($isWindowsHost) { 'curl.exe is built-in on Windows 10+. For older Windows install from https://curl.se/windows/' } else { 'install with: apt-get install curl / brew install curl' }
+    throw "CURL_NOT_FOUND: no curl binary found in PATH (tried: $($candidates -join ', ')). $hint"
 }
 
 function Import-CrossConfig {
     param([string]$ConfigPath = '')
-    if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
-        throw 'CURL_NOT_FOUND: curl.exe not found in PATH (required for the OpenCode API)'
-    }
+    $null = Get-CrossCurlCommand   # F3: validate and cache resolved command
     if (-not $ConfigPath) { $ConfigPath = Join-Path $PSScriptRoot '..\cross.config.json' }
     $configPath = [System.IO.Path]::GetFullPath($ConfigPath)
     if (-not (Test-Path -LiteralPath $configPath)) { throw "CONFIG_NOT_FOUND: $configPath" }
@@ -110,8 +127,9 @@ function Test-CrossHealthRaw {
         $tmp = Join-Path $env:TEMP ("cross_health_" + [System.Guid]::NewGuid().ToString('N') + ".txt")
         $netrcFile = $null
         try { $netrcFile = Get-CrossNetrcFile -Password $Password } catch { }
-        if ($netrcFile) { $code = & curl.exe -s -o $tmp -w "%{http_code}" --max-time 5 --netrc-file $netrcFile $url 2>$null }
-        else { $code = & curl.exe -s -o $tmp -w "%{http_code}" --max-time 5 -u "opencode:$Password" $url 2>$null }
+        $curl = Get-CrossCurlCommand   # F3
+        if ($netrcFile) { $code = & $curl -s -o $tmp -w "%{http_code}" --max-time 5 --netrc-file $netrcFile $url 2>$null }
+        else { $code = & $curl -s -o $tmp -w "%{http_code}" --max-time 5 -u "opencode:$Password" $url 2>$null }
         if ($netrcFile) { Remove-Item -LiteralPath $netrcFile -ErrorAction SilentlyContinue }
         $body = if (Test-Path -LiteralPath $tmp) { Get-Content -LiteralPath $tmp -Raw } else { '' }
         Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
@@ -213,8 +231,10 @@ function Get-CrossPortFromLog {
                 if (-not (Test-Path -LiteralPath $mainLog)) { continue }
                 try {
                     $content = Get-Content -LiteralPath $mainLog -Raw
-                    $m = [regex]::Match($content, "server ready.*url: 'http://127\.0\.0\.1:(\d+)'")
-                    if ($m.Success) { return [int]$m.Groups[1].Value }
+                    # F2 (v1.16): [^\r\n]* avoids crossing lines (greedy .* could jump to a later
+                    # restart URL); take the LAST match = most recent server start.
+                    $ms = [regex]::Matches($content, "server ready[^\r\n]*url: 'http://127\.0\.0\.1:(\d+)'")
+                    if ($ms.Count -gt 0) { return [int]$ms[$ms.Count - 1].Groups[1].Value }
                 } catch {}
             }
         }
@@ -226,9 +246,9 @@ function Get-CrossPortFromLog {
     if (-not (Test-Path -LiteralPath $mainLog)) { return $null }
     try {
         $content = Get-Content -LiteralPath $mainLog -Raw
-        $m = [regex]::Match($content, "server ready.*url: 'http://127\.0\.0\.1:(\d+)'")
-        if ($m.Success) { return [int]$m.Groups[1].Value }
-    } catch {}
+        # F2 (v1.16): see above.
+        $ms = [regex]::Matches($content, "server ready[^\r\n]*url: 'http://127\.0\.0\.1:(\d+)'")
+        if ($ms.Count -gt 0) { return [int]$ms[$ms.Count - 1].Groups[1].Value }    } catch {}
     return $null
 }
 
@@ -239,7 +259,7 @@ function Get-CrossPortByScan {
     $candidates = New-Object System.Collections.ArrayList
     for ($p = $lo; $p -le $hi; $p++) {
         if ($watch.Elapsed.TotalMilliseconds -gt $ScanTimeoutMs) {
-            Write-CrossDiag -Level debug -Message "scan abierto por ScanTimeoutMs=$ScanTimeoutMs tras $p puertos"
+            Write-CrossDiag -Level debug -Message "scan aborted at ScanTimeoutMs=$ScanTimeoutMs after $p ports"
             break
         }
         $tcp = $null
@@ -250,7 +270,7 @@ function Get-CrossPortByScan {
                 if ($tcp.Connected) { [void]$candidates.Add($p) }
             }
         } catch {
-            # puerto reservado / socket error: skip este puerto
+            # reserved port / socket error: skip this port
         } finally {
             if ($tcp) { $tcp.Close() }
         }
@@ -298,11 +318,11 @@ function Resolve-CrossEndpoint {
         if (-not $HealthSkip) {
             $h = Test-CrossHealthRaw -Port $Port -Password $Password
             if (-not $h.healthy) {
-                return @{ ok = $false; code = 3; err = 'UNHEALTHY'; detail = "puerto $Port responde pero healthy=false o codigo $($h.status)"; hint = 'usar --no-cache para forzar redeteccion' }
+                return @{ ok = $false; code = 3; err = 'UNHEALTHY'; detail = "port $Port responds but healthy=false or code $($h.status)"; hint = 'use --no-cache to force re-detection' }
             }
         }
         $watch.Stop()
-        return @{ ok = $true; code = 0; port = $Port; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
+        return @{ ok = $true; code = 0; port = $Port; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; source = $detectionMethod; degraded = ($detectionMethod -eq 'regex' -or $detectionMethod -eq 'scan'); duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
     }
 
     if (-not $NoCache) {
@@ -310,16 +330,16 @@ function Resolve-CrossEndpoint {
         if ($cached) {
             if ($HealthSkip) {
                 $watch.Stop()
-                return @{ ok = $true; code = 0; port = $cached; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
+                return @{ ok = $true; code = 0; port = $cached; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; source = $detectionMethod; degraded = ($detectionMethod -eq 'regex' -or $detectionMethod -eq 'scan'); duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
             }
             $h = Test-CrossHealthRaw -Port $cached -Password $Password
             if ($h.healthy) {
                 $watch.Stop()
-                return @{ ok = $true; code = 0; port = $cached; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
+                return @{ ok = $true; code = 0; port = $cached; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; source = $detectionMethod; degraded = ($detectionMethod -eq 'regex' -or $detectionMethod -eq 'scan'); duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
             }
-            Write-CrossDiag -Level warn -Message "cache descartado: puerto $cached no healthy (status $($h.status))"
+            Write-CrossDiag -Level warn -Message "cache discarded: port $cached not healthy (status $($h.status))"
         } else {
-            Write-CrossDiag -Level debug -Message 'cache: sin entrada valida'
+            Write-CrossDiag -Level debug -Message 'cache: no valid entry'
         }
     }
 
@@ -328,17 +348,17 @@ function Resolve-CrossEndpoint {
         $detectionMethod = 'well-known'
         if ($HealthSkip) {
             $watch.Stop()
-            return @{ ok = $true; code = 0; port = $wellKnown; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
+            return @{ ok = $true; code = 0; port = $wellKnown; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; source = $detectionMethod; degraded = ($detectionMethod -eq 'regex' -or $detectionMethod -eq 'scan'); duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
         }
         $h = Test-CrossHealthRaw -Port $wellKnown -Password $Password
         if ($h.healthy) {
             Write-CrossPortCache -Port $wellKnown -PasswordHash $pwHash
             $watch.Stop()
-            return @{ ok = $true; code = 0; port = $wellKnown; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
+            return @{ ok = $true; code = 0; port = $wellKnown; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; source = $detectionMethod; degraded = ($detectionMethod -eq 'regex' -or $detectionMethod -eq 'scan'); duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
         }
-        Write-CrossDiag -Level warn -Message "well-known descartado: puerto $wellKnown no healthy (status $($h.status))"
+        Write-CrossDiag -Level warn -Message "well-known discarded: port $wellKnown not healthy (status $($h.status))"
     } else {
-        Write-CrossDiag -Level debug -Message 'well-known: sin archivo valido'
+        Write-CrossDiag -Level debug -Message 'well-known: no valid file'
     }
 
     $fromLog = Get-CrossPortFromLog
@@ -347,17 +367,17 @@ function Resolve-CrossEndpoint {
         if ($HealthSkip) {
             Write-CrossPortCache -Port $fromLog -PasswordHash $pwHash
             $watch.Stop()
-            return @{ ok = $true; code = 0; port = $fromLog; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
+            return @{ ok = $true; code = 0; port = $fromLog; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; source = $detectionMethod; degraded = ($detectionMethod -eq 'regex' -or $detectionMethod -eq 'scan'); duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
         }
         $h = Test-CrossHealthRaw -Port $fromLog -Password $Password
         if ($h.healthy) {
             Write-CrossPortCache -Port $fromLog -PasswordHash $pwHash
             $watch.Stop()
-            return @{ ok = $true; code = 0; port = $fromLog; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
+            return @{ ok = $true; code = 0; port = $fromLog; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; source = $detectionMethod; degraded = ($detectionMethod -eq 'regex' -or $detectionMethod -eq 'scan'); duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
         }
-        Write-CrossDiag -Level warn -Message "log descartado: puerto $fromLog no healthy (status $($h.status))"
+        Write-CrossDiag -Level warn -Message "log discarded: port $fromLog not healthy (status $($h.status))"
     } else {
-        Write-CrossDiag -Level debug -Message 'log: sin puerto detectado (regex no matcheo o dir inexistente)'
+        Write-CrossDiag -Level debug -Message 'log: no port detected (regex did not match or dir missing)'
     }
 
     $scanTimeoutMs = $config.port_scan_timeout_ms
@@ -369,21 +389,21 @@ function Resolve-CrossEndpoint {
         if ($HealthSkip) {
             Write-CrossPortCache -Port $scanned -PasswordHash $pwHash
             $watch.Stop()
-            return @{ ok = $true; code = 0; port = $scanned; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
+            return @{ ok = $true; code = 0; port = $scanned; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; source = $detectionMethod; degraded = ($detectionMethod -eq 'regex' -or $detectionMethod -eq 'scan'); duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
         }
         $h = Test-CrossHealthRaw -Port $scanned -Password $Password
         if ($h.healthy) {
             Write-CrossPortCache -Port $scanned -PasswordHash $pwHash
             $watch.Stop()
-            return @{ ok = $true; code = 0; port = $scanned; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
+            return @{ ok = $true; code = 0; port = $scanned; password = $Password; password_source = $passwordSource; detection_method = $detectionMethod; source = $detectionMethod; degraded = ($detectionMethod -eq 'regex' -or $detectionMethod -eq 'scan'); duration_ms = [math]::Round($watch.Elapsed.TotalMilliseconds) }
         }
-        Write-CrossDiag -Level warn -Message "scan descartado: puerto $scanned no healthy (status $($h.status))"
+        Write-CrossDiag -Level warn -Message "scan discarded: port $scanned not healthy (status $($h.status))"
     } else {
-        Write-CrossDiag -Level warn -Message "scan: sin candidatos healthy (ScanTimeoutMs=$scanTimeoutMs)"
+        Write-CrossDiag -Level warn -Message "scan: no healthy candidates (ScanTimeoutMs=$scanTimeoutMs)"
     }
 
     $watch.Stop()
-    return @{ ok = $false; code = 3; err = 'SERVER_NOT_FOUND'; detail = 'ningun puerto respondio /global/health healthy'; hint = 'comprobar que OpenCode Desktop esta abierto y autodeteccion habilitada' }
+    return @{ ok = $false; code = 3; err = 'SERVER_NOT_FOUND'; detail = 'no port responded /global/health healthy'; hint = 'check that OpenCode Desktop is open and auto-detection is enabled' }
 }
 
 function Invoke-CrossApi {
@@ -409,7 +429,8 @@ function Invoke-CrossApi {
         $args += @('-H', 'Content-Type: application/json', '--data-binary', "@$tmpBody")
     }
     $args += $url
-    $code = & curl.exe @args 2>$null
+    $curl = Get-CrossCurlCommand   # F3
+    $code = & $curl @args 2>$null
     if ($netrcFile) { Remove-Item -LiteralPath $netrcFile -ErrorAction SilentlyContinue }
     $body = if (Test-Path -LiteralPath $tmpOut) { Get-Content -LiteralPath $tmpOut -Raw } else { '' }
     Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
@@ -417,4 +438,4 @@ function Invoke-CrossApi {
     return @{ status = [int]$code; body = $body }
 }
 
-Export-ModuleMember -Function Import-CrossConfig, Get-CrossConfig, Get-CrossPassword, Get-PasswordHash, Get-CrossNetrcFile, Test-CrossHealthRaw, Resolve-CrossEndpoint, Invoke-CrossApi, Get-CrossPortFromCache, Write-CrossPortCache, Get-CrossPortFromLog, Get-CrossPortByScan, Get-CrossPortWellKnown, Write-CrossPortWellKnown, Write-CrossDiag
+Export-ModuleMember -Function Import-CrossConfig, Get-CrossConfig, Get-CrossCurlCommand, Get-CrossPassword, Get-PasswordHash, Get-CrossNetrcFile, Test-CrossHealthRaw, Resolve-CrossEndpoint, Invoke-CrossApi, Get-CrossPortFromCache, Write-CrossPortCache, Get-CrossPortFromLog, Get-CrossPortByScan, Get-CrossPortWellKnown, Write-CrossPortWellKnown, Write-CrossDiag

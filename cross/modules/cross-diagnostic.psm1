@@ -595,6 +595,8 @@ function Get-CrossMetrics {
         $topNack += [ordered]@{ reason = $k; count = $nackReasons[$k] }
         if ($topNack.Count -ge $topNackLimit) { break }
     }
+    $v1Usage = $null
+    try { $v1Usage = Get-CrossV1Usage } catch { }
     return @{
         ok = $true; source = 'delivery_log.jsonl'; log_path = $LogPath; total = $total
         by_outcome = $outcome; rates = $rates
@@ -602,6 +604,7 @@ function Get-CrossMetrics {
         attempts = $attempts; lease_renewals = $leaseRenewals
         top_nack = @($topNack); quarantine = $quarantine; dlq = $dlq
         by_agent = $byAgentCounts
+        v1_ack_parse_count = if ($v1Usage) { [int]$v1Usage.count } else { $null }
     }
 }
 
@@ -673,6 +676,12 @@ function Get-CrossDoctorReport {
     } catch {
         [void]$checks.Add([ordered]@{ name = 'config'; status = 'fail'; detail = "config no valido: $_" })
     }
+
+    # F4 (v1.16): deprecated v1 ACK parser usage visibility
+    try {
+        $v1u = Get-CrossV1Usage
+        [void]$checks.Add([ordered]@{ name = 'v1_deprecation'; status = $(if ($v1u.count -gt 0) { 'warn' } else { 'ok' }); detail = "v1 ACK parses this session: $($v1u.count) (format removed in $($v1u.removed_in))" })
+    } catch { }
 
     # 2. paths
     try {

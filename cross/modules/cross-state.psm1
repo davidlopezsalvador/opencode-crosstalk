@@ -142,19 +142,31 @@ function New-CrossClaim {
         [string]$Path = ''
     )
     if (-not $Path) { $Path = Get-IdempotenciaPath }
-    if (-not $Owner) { return @{ ok = $false; err = 'NO_OWNER'; detail = '--owner o config.my_session_id requerido' } }
-    $last = Get-MsgState -MsgId $MsgId -Path $Path
-    if ($null -ne $last) {
-        if ($last.state -match '^CLAIMED_BY=(.+)$') {
-            $claimedBy = $Matches[1]
-            if ($claimedBy -eq $Owner) { return @{ ok = $true; already = $true; detail = "ya reclamado por $Owner" } }
-            return @{ ok = $false; err = 'ALREADY_CLAIMED_BY_OTHER'; detail = "msg_id $MsgId ya reclamado por $claimedBy" }
+    if (-not $Owner) { return @{ ok = $false; err = 'NO_OWNER'; detail = '--owner or config.my_session_id required' } }
+    # F1 TOCTOU fix (v1.16): the full read->verify->write block is atomic under
+    # the state file global mutex. Any future writer to idempotencia-procesados.md
+    # MUST use Get-OutboxMutex (fixed order: never acquire together with the
+    # outbox mutex).
+    $mutex = Get-OutboxMutex -Path $Path
+    $locked = $false
+    try {
+        $locked = $mutex.WaitOne(30000)
+        if (-not $locked) { return @{ ok = $false; err = 'LOCK_TIMEOUT'; detail = 'could not acquire state mutex within 30s' } }
+        $last = Get-MsgState -MsgId $MsgId -Path $Path
+        if ($null -ne $last) {
+            if ($last.state -match '^CLAIMED_BY=(.+)$') {
+                $claimedBy = $Matches[1]
+                if ($claimedBy -eq $Owner) { return @{ ok = $true; already = $true; detail = "already claimed by $Owner" } }
+                return @{ ok = $false; err = 'ALREADY_CLAIMED_BY_OTHER'; detail = "msg_id $MsgId already claimed by $claimedBy" }
+            }
+            if ($last.state -eq 'PROCESADO') { return @{ ok = $true; already = $true; detail = 'already processed' } }
         }
-        if ($last.state -eq 'PROCESADO') { return @{ ok = $true; already = $true; detail = 'already processed' } }
+        $ts = Get-StateTimestamp
+        [void](Add-IdempotenciaLine -MsgId $MsgId -Timestamp $ts -Modelo $Modelo -State "CLAIMED_BY=$Owner" -Path $Path)
+        return @{ ok = $true; already = $false }
+    } finally {
+        if ($locked) { try { $mutex.ReleaseMutex() } catch { } }
     }
-    $ts = Get-StateTimestamp
-    [void](Add-IdempotenciaLine -MsgId $MsgId -Timestamp $ts -Modelo $Modelo -State "CLAIMED_BY=$Owner" -Path $Path)
-    return @{ ok = $true; already = $false }
 }
 
 function New-CrossRelease {
@@ -166,20 +178,29 @@ function New-CrossRelease {
         [string]$Path = ''
     )
     if (-not $Path) { $Path = Get-IdempotenciaPath }
-    if (-not $Owner) { return @{ ok = $false; err = 'NO_OWNER'; detail = '--owner o config.my_session_id requerido' } }
-    $last = Get-MsgState -MsgId $MsgId -Path $Path
-    if ($null -eq $last) { return @{ ok = $false; err = 'NOT_CLAIMED'; detail = "no prior claim for $MsgId" } }
-    if ($last.state -match '^SUPERSEDED_BY=') { return @{ ok = $true; already = $true; detail = 'ya liberado' } }
-    if ($last.state -eq 'PROCESADO') { return @{ ok = $false; err = 'ALREADY_PROCESSED'; detail = "msg_id $MsgId is already PROCESADO, cannot be released" } }
-    if ($last.state -match '^CLAIMED_BY=(.+)$') {
-        $claimedBy = $Matches[1]
-        if (-not $Force -and $claimedBy -ne $Owner) {
-            return @{ ok = $false; err = 'NOT_OWNER'; detail = "reclamado por $claimedBy; usar --force para liberar" }
+    if (-not $Owner) { return @{ ok = $false; err = 'NO_OWNER'; detail = '--owner or config.my_session_id required' } }
+    # F1 TOCTOU fix (v1.16): see New-CrossClaim.
+    $mutex = Get-OutboxMutex -Path $Path
+    $locked = $false
+    try {
+        $locked = $mutex.WaitOne(30000)
+        if (-not $locked) { return @{ ok = $false; err = 'LOCK_TIMEOUT'; detail = 'could not acquire state mutex within 30s' } }
+        $last = Get-MsgState -MsgId $MsgId -Path $Path
+        if ($null -eq $last) { return @{ ok = $false; err = 'NOT_CLAIMED'; detail = "no prior claim for $MsgId" } }
+        if ($last.state -match '^SUPERSEDED_BY=') { return @{ ok = $true; already = $true; detail = 'already released' } }
+        if ($last.state -eq 'PROCESADO') { return @{ ok = $false; err = 'ALREADY_PROCESSED'; detail = "msg_id $MsgId is already PROCESADO, cannot be released" } }
+        if ($last.state -match '^CLAIMED_BY=(.+)$') {
+            $claimedBy = $Matches[1]
+            if (-not $Force -and $claimedBy -ne $Owner) {
+                return @{ ok = $false; err = 'NOT_OWNER'; detail = "claimed by $claimedBy; use --force to release" }
+            }
         }
+        $ts = Get-StateTimestamp
+        [void](Add-IdempotenciaLine -MsgId $MsgId -Timestamp $ts -Modelo $Modelo -State "SUPERSEDED_BY=$Owner" -Path $Path)
+        return @{ ok = $true; already = $false }
+    } finally {
+        if ($locked) { try { $mutex.ReleaseMutex() } catch { } }
     }
-    $ts = Get-StateTimestamp
-    [void](Add-IdempotenciaLine -MsgId $MsgId -Timestamp $ts -Modelo $Modelo -State "SUPERSEDED_BY=$Owner" -Path $Path)
-    return @{ ok = $true; already = $false }
 }
 
 function New-CrossDone {
@@ -190,20 +211,29 @@ function New-CrossDone {
         [string]$Path = ''
     )
     if (-not $Path) { $Path = Get-IdempotenciaPath }
-    if (-not $Owner) { return @{ ok = $false; err = 'NO_OWNER'; detail = '--owner o config.my_session_id requerido' } }
-    $last = Get-MsgState -MsgId $MsgId -Path $Path
-    if ($null -eq $last) { return @{ ok = $false; err = 'NOT_CLAIMED'; detail = "no prior claim for $MsgId" } }
-    if ($last.state -eq 'PROCESADO') { return @{ ok = $true; already = $true; detail = 'already processed' } }
-    if ($last.state -match '^SUPERSEDED_BY=') {
-        return @{ ok = $false; err = 'RELEASED_CANNOT_DONE'; detail = "msg_id $MsgId was released (SUPERSEDED_BY), cannot be marked PROCESADO" }
+    if (-not $Owner) { return @{ ok = $false; err = 'NO_OWNER'; detail = '--owner or config.my_session_id required' } }
+    # F1 TOCTOU fix (v1.16): see New-CrossClaim.
+    $mutex = Get-OutboxMutex -Path $Path
+    $locked = $false
+    try {
+        $locked = $mutex.WaitOne(30000)
+        if (-not $locked) { return @{ ok = $false; err = 'LOCK_TIMEOUT'; detail = 'could not acquire state mutex within 30s' } }
+        $last = Get-MsgState -MsgId $MsgId -Path $Path
+        if ($null -eq $last) { return @{ ok = $false; err = 'NOT_CLAIMED'; detail = "no prior claim for $MsgId" } }
+        if ($last.state -eq 'PROCESADO') { return @{ ok = $true; already = $true; detail = 'already processed' } }
+        if ($last.state -match '^SUPERSEDED_BY=') {
+            return @{ ok = $false; err = 'RELEASED_CANNOT_DONE'; detail = "msg_id $MsgId was released (SUPERSEDED_BY), cannot be marked PROCESADO" }
+        }
+        if ($last.state -match '^CLAIMED_BY=(.+)$') {
+            $claimedBy = $Matches[1]
+            if ($claimedBy -ne $Owner) { return @{ ok = $false; err = 'NOT_OWNER'; detail = "claimed by $claimedBy, not by $Owner" } }
+        }
+        $ts = Get-StateTimestamp
+        [void](Add-IdempotenciaLine -MsgId $MsgId -Timestamp $ts -Modelo $Modelo -State 'PROCESADO' -Path $Path)
+        return @{ ok = $true; already = $false }
+    } finally {
+        if ($locked) { try { $mutex.ReleaseMutex() } catch { } }
     }
-    if ($last.state -match '^CLAIMED_BY=(.+)$') {
-        $claimedBy = $Matches[1]
-        if ($claimedBy -ne $Owner) { return @{ ok = $false; err = 'NOT_OWNER'; detail = "claimed by $claimedBy, not by $Owner" } }
-    }
-    $ts = Get-StateTimestamp
-    [void](Add-IdempotenciaLine -MsgId $MsgId -Timestamp $ts -Modelo $Modelo -State 'PROCESADO' -Path $Path)
-    return @{ ok = $true; already = $false }
 }
 
 function Read-OutboxLog {

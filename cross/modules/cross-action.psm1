@@ -294,7 +294,7 @@ function Write-CrossDlq {
         [scriptblock]$SendFn
     )
     if (-not $MsgId) { return @{ ok = $false; err = 'USAGE_ERROR'; detail = 'missing --msg-id' } }
-    $validFlags = @('HUMAN_REVIEW', 'NACK_ORIGINATED', 'QUARANTINE', 'PROVIDER_DOWN')
+    $validFlags = @('HUMAN_REVIEW', 'NACK_ORIGINATED', 'QUARANTINE', 'PROVIDER_DOWN', 'TOTAL_TIMEOUT')
     if (-not $Flag) { $Flag = 'HUMAN_REVIEW' }
     if ($Flag -notin $validFlags) {
         return @{ ok = $false; err = 'DLQ_FLAG_INVALID'; detail = "flag not closed: $Flag (valid: $($validFlags -join ', '))" }
