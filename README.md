@@ -3,6 +3,9 @@
 [![tests](https://github.com/davidlopezsalvador/opencode-crosstalk/actions/workflows/test.yml/badge.svg)](https://github.com/davidlopezsalvador/opencode-crosstalk/actions/workflows/test.yml)
 
 [User Guide for Non-Coders](USER_GUIDE.md) | [Protocol spec](CROSS_TALK.md) | [Changelog](CHANGELOG.md) | [Windows pitfalls](CROSS_WINDOWS.md)
+> **Are you an LLM agent?** Read [`AGENTS.md`](AGENTS.md) - it bootstraps you into
+> the protocol in ~3 minutes (identify yourself -> connect -> send/receive tasks,
+> with ACK and signing conventions). Curated doc index: [`llms.txt`](llms.txt).
 
 
 ## What it does

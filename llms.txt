@@ -1,0 +1,21 @@
+# llms.txt — OpenCode Cross-Talk
+
+> Durable verifiable messaging between LLM sessions (OpenCode): outbox, ACK/NACK,
+> retries, idempotency, DLQ. PowerShell CLI + local HTTP API.
+
+## Start here
+- [AGENTS.md](AGENTS.md): bootstrap for LLM sessions — identify, connect, send/receive tasks. Read this first.
+- [QUICKSTART.md](QUICKSTART.md): human-oriented 3-minute quick start.
+
+## Protocol & usage
+- [CROSS_TALK.md](CROSS_TALK.md): complete protocol specification (envelope v2, states, leases).
+- [USER_GUIDE.md](USER_GUIDE.md): usage guide without touching code.
+- [README.md](README.md): overview, features, architecture.
+
+## Operations
+- [TROUBLESHOOTING section in README](README.md#troubleshooting): common failures and fixes.
+- [CHANGELOG.md](CHANGELOG.md): version history.
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to contribute.
+
+## Platform notes
+- [CROSS_WINDOWS.md](CROSS_WINDOWS.md): Windows/PowerShell 5.1 pitfalls (BOM, curl.exe, CRLF).
