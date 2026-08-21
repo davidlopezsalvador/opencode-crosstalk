@@ -124,6 +124,8 @@ Write-Host ""
 $results  | ForEach-Object { Write-Host $_ }
 $failures | ForEach-Object { Write-Host $_ -ForegroundColor Red }
 Write-Host ""
+# v1.16: CI-compatible summary line (workflow parses 'RESULT: X pass, Y fail')
+Write-Host ("RESULT: {0} pass, {1} fail" -f $results.Count, $failures.Count)
 if ($failures.Count -eq 0) {
     Write-Host "T-idempotencia-race: ALL PASS ($($results.Count) checks)" -ForegroundColor Green
     exit 0
