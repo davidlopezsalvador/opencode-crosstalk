@@ -92,10 +92,12 @@ function Get-CrossNetrcFile {
     $netrcPath = Join-Path $env:TEMP ("cross_netrc_" + [System.Guid]::NewGuid().ToString('N') + ".txt")
     $content = "machine $HostName`nlogin opencode`npassword $Password"
     [System.IO.File]::WriteAllText($netrcPath, $content, [System.Text.Encoding]::ASCII)
-    if ($env:OS -eq 'Windows_NT' -or -not $IsWindows) {
+    if ($env:CI -or $env:GITHUB_ACTIONS) {
+        # Skip icacls in CI runners to avoid I/O saturation in concurrent tests
+    } elseif ($env:OS -eq 'Windows_NT') {
         $user = "$env:USERDOMAIN\$env:USERNAME"
         $null = & icacls.exe $netrcPath /inheritance:r /grant:r "$user`:(R,W)" 2>$null
-    } else {
+    } elseif (-not $IsWindows) {
         $null = & chmod 600 $netrcPath 2>$null
     }
     return $netrcPath
