@@ -3,69 +3,16 @@
 Reference document so that any agent in this project can communicate
 with other open chats/sessions in the same project.
 
-> **Current version: v1.8.4 (2026-08-20).** v1.8.4 adds usability for
-> new users: `install.ps1` one-command setup (writes git-ignored
-> `cross/cross.config.local.json`, which `Import-CrossConfig` now merges
-> over the publish template), a CI workflow with badge, README install +
-> handshake example, CONTRIBUTING.md and issue templates. v1.8.3 closes BUG II found by
-> GLM's third review: the DLQ writer now emits `ESTADO=UNREAD` (was
-> `STATUS=UNREAD`), matching the parser, §12.7 doc and T-status fixture, so
-> `cross status` reports `dlq_unread` correctly; a round-trip test was added
-> to T-dlq. T-transport also gained a SKIP guard for server-dependent
-> scenarios (same pattern as T-e2e). v1.8.2 closes the 31
-> pre-existing test failures GLM's second review flagged before publication:
-> tests now adapt to the publish template's empty identity or SKIP with a
-> clear message (cause a), all module messages are translated to English
-> including the DLQ format (`to=`/`from=`/`retries=`, cause b), and
-> server-dependent tests SKIP cleanly when no live server/identity is present
-> (cause c). v1.8.1 closes the 4 bugs found
-> by the GLM external review (pre-publication): restores
-> `cross/send_message.ps1` (BUG EE), aligns §4e with the real architecture
-> (BUG FF), renumbers the duplicate section 3 to 2 (BUG GG) and makes
-> `Invoke-CrossAutoSweep -DryRun` truly non-mutating (BUG HH). v1.8 adds
-> two **low-cost
-> operational improvements** (leader decision based on the REVISION-89
-> advisor review of nemotron's report after its failed experiment as leader,
-> plus the ESTADO-88 availability query, 3/3 verified via API):
-> (1) the **heartbeat `ESTADO:` convention** (§10.3): advisors publish their
-> availability periodically so the leader can build a live dashboard without
-> nudging them; (2) the **`Send-CrossMessage.ps1` enhanced wrapper** (§4e.2):
-> auto-detection, retry with exponential backoff and optional delivery
-> verification by polling the destination history. Both are optional
-> utilities — the manual method (4a-4c) and the existing wrapper (4e) remain
-> valid. v1.7.1 adds the **pre-built JSON
-> fallback** after the second E2E test (TEST-E2E-86, 4/4 confirmed again):
-> for models that STILL fail with the ready-to-copy script
-> (openrouter/free copies the script's source line as payload text instead of
-> executing it, producing literal backticks/`$(...)` in the message), the
-> leader leaves the JSON payload ALREADY BUILT in a shared temp path
-> (`$env:TEMP`, ASCII no BOM, no interpolation) and the advisor only runs a
-> single `curl --data-binary "@archivo"` line. Verified: works in 1 nudge.
-> v1.7 adds the **ready-to-copy script**
-> rule after the E2E protocol test (TEST-E2E-85, 4/4 advisors confirmed):
-> the leader's task message MUST include the full send script (or the
-> `send_message.ps1` wrapper invocation) ready to copy/execute, because
-> some models (openrouter/free, nemotron-3-ultra-free) cannot build the
-> command themselves (they break PowerShell syntax or only reply in their
-> own chat). It also consolidates the E2E-tested delivery loop: send →
-> ACK-PROTOCOLO → signed reply via API → leader verifies token in its
-> history. v1.6.1 made semantic corrections after
-> external review (external-reviewer + 4 advisors + external-reviewer) of the anti-sleep
-> protocol v1.6 (section 12): about standard message with `msg_id`, durable outbox,
-> ACK at turn boundary (decision window 120s, no backoff), passive
-> presence, lease with successor, escalation, DLQ, idempotency (at-least-once +
-> dedupe with CLAIMED state), circuit breaker A/B/C and recovery scan
-> RETRY/RESUME/RECONCILE/QUARANTINE with server log diagnostics.
-> v1.6.1 clarifies identities (task_id/run_id/msg_id/attempt/session_id), separates
-> RESUME (`sigue`) from RETRY, adds AVISO-SPOF (passive detection of the leader's
-> SPOF, no re-election), explicit NACK (7.5), protocol handshake
-> (ACK-PROTOCOLO, 4d), append-only idempotency with CLAIMED state (12.8),
-> flag in DLQ (12.7) and canonical critical rules block (4f).
-> Golden rule: ALWAYS `prompt_async` without `noReply` to wake up (5.1, 12).
+> **Protocol version: 1.8** (handshake `ACK-PROTOCOLO:1.8`). Release: **v1.16.0**
+> (2026-08-21): atomic idempotency CLAIM (TOCTOU), hardened port discovery with
+> `source`/`degraded` metadata, cross-platform curl resolution, v1 ACK parser
+> deprecation (removal in v1.17), and a hard total delivery cap (`TOTAL_TIMEOUT`
+> -> DLQ). The wire protocol is unchanged.
 >
-> Version history and discoveries are in **`CHANGELOG.md`**
-> (v1.1 → v1.8.1), Windows pitfalls in **`CROSS_WINDOWS.md`**. This
-> file contains ONLY the current rules.
+> This file contains ONLY the current rules. Version history lives in
+> **CHANGELOG.md**; Windows pitfalls in **CROSS_WINDOWS.md**. LLM agents:
+> read **AGENTS.md** first for a 3-minute bootstrap; humans start at
+> **QUICKSTART.md**.
 
 ## Context
 
@@ -162,15 +109,15 @@ curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session/<SESSION_ID>
 > (or `Set-Content -Encoding utf8`), PowerShell writes a **BOM** at the start
 > and the server responds `HTTP 500 Unexpected server error`
 > (`err_82db6391`/`err_cb996c5b`). It must be UTF-8 **without BOM**:
-> `New-Object System.Text.UTF8Encoding($false)` — or simply ASCII
+> `New-Object System.Text.UTF8Encoding($false)` â€” or simply ASCII
 > (no accents), which is what `send_message.ps1` uses (4e).
 >
 > **Prefer ASCII for sending (v1.5, model-c contribution):** if the message
-> text may contain non-ASCII characters (accents, ñ's, symbols), it is safer
+> text may contain non-ASCII characters (accents, Ã±'s, symbols), it is safer
 > to send in plain ASCII than in UTF-8 without BOM: even with UTF-8 without BOM,
-> characters like "í" or "ñ" may arrive as `?` (mojibake) at the destination.
+> characters like "Ã­" or "Ã±" may arrive as `?` (mojibake) at the destination.
 > Write messages without accents or replace problematic characters.
-> This applies to ALL sends between sessions (leader→advisor and advisor→leader).
+> This applies to ALL sends between sessions (leaderâ†’advisor and advisorâ†’leader).
 
 ### 4a. Deliver a message without the destination agent processing it (`noReply: true`)
 
@@ -211,7 +158,7 @@ This call is synchronous: it waits for the destination agent to finish replying
 immediately. The destination agent processes it in the background and may
 reply to you later. **It is the standard and preferred method for all
 agent communication** (v1.5, model-d contribution): it does not block, wakes up the
-destination, and does not need `noReply` (which is redundant — `prompt_async` already delivers
+destination, and does not need `noReply` (which is redundant â€” `prompt_async` already delivers
 without waiting for a reply). Use `noReply` (4a) or synchronous `/message` (4b) only
 when you have a specific reason.
 
@@ -245,7 +192,7 @@ ALWAYS reply to that origin session via API (prompt_async WITHOUT noReply):
 NEVER write the reply only in your own chat (the leader will not see it).
 VERIFY delivery: after sending, read the leader's history
 (GET /session/<LEADER_ID>/message) and confirm your token is there.
-PROTOCOL: CROSS-TALK v1.8 — reply ACK-PROTOCOLO:1.8 if you understand
+PROTOCOL: CROSS-TALK v1.8 â€” reply ACK-PROTOCOLO:1.8 if you understand
 ]
 ```
 
@@ -254,12 +201,12 @@ PROTOCOL: CROSS-TALK v1.8 — reply ACK-PROTOCOLO:1.8 if you understand
 task message includes the line `PROTOCOLO: CROSS-TALK v1.8`. The advisor
 must reply `ACK-PROTOCOLO:1.8` (EXACTLY three segments: no `v`, no
 prefix) within the first 30 s, along with its first ACK if applicable. Rules:
-- If the advisor replies `ACK-PROTOLO:1.8` → compatible version.
-- If it replies `ACK-PROTOCOLO:<other_version>` → incompatibility: the leader sends
-  it the **canonical critical rules block (§4f)** and clarifies the
+- If the advisor replies `ACK-PROTOLO:1.8` â†’ compatible version.
+- If it replies `ACK-PROTOCOLO:<other_version>` â†’ incompatibility: the leader sends
+  it the **canonical critical rules block (Â§4f)** and clarifies the
   version difference before proceeding.
-- If it does NOT reply within 30 s → the leader assumes it is an agent without protocol: it
-  sends the critical rules block (§4f) and retries the handshake.
+- If it does NOT reply within 30 s â†’ the leader assumes it is an agent without protocol: it
+  sends the critical rules block (Â§4f) and retries the handshake.
 - An agent that does not understand the handshake may also reply
   `NACK-PROTOCOLO:unsupported_version:<received_version>` (or with the version
   it does understand); the leader decides whether to continue with that version or exclude it.
@@ -284,11 +231,11 @@ This way no one guesses or copies other people's IDs.
 > Real E2E results: 2/4 advisors (big-pickle, mimo) reply via API without
 > help; openrouter/free breaks the PowerShell command syntax (parser
 > errors) and nemotron-3-ultra-free only writes in its own chat, it never
-> sends via API — BOTH resolved only after the leader sent the script
+> sends via API â€” BOTH resolved only after the leader sent the script
 > verbatim (took 2 and 4 rounds respectively). Therefore, the task message
 > includes at least:
 >
-> 1. The identity block of §4d (IDs, model, leader, signature).
+> 1. The identity block of Â§4d (IDs, model, leader, signature).
 > 2. The instruction "USE YOUR BASH TOOL. Copy and run EXACTLY this script"
 >    followed by the full script (see below), with the advisor's reply text
 >    already embedded and signed.
@@ -334,7 +281,7 @@ This way no one guesses or copies other people's IDs.
 > **Concrete example (leader side, after writing the payload to a shared path):**
 >
 > ```powershell
-> $payload = @{ parts = @(@{ type = "text"; text = "TAREA-R1:ses_abc:model-b  PROTOCOLO: CROSS-TALK v1.8 — reply ACK-PROTOCOLO:1.8" }) }
+> $payload = @{ parts = @(@{ type = "text"; text = "TAREA-R1:ses_abc:model-b  PROTOCOLO: CROSS-TALK v1.8 â€” reply ACK-PROTOCOLO:1.8" }) }
 > $tmp = "$env:TEMP\opencode\e2e86_listo.json"
 > [System.IO.File]::WriteAllText($tmp, ($payload | ConvertTo-Json -Depth 3), (New-Object System.Text.UTF8Encoding($false)))
 > ```
@@ -357,7 +304,7 @@ This way no one guesses or copies other people's IDs.
 > human user can read at a glance which model sent each message, instead
 > of deciphering a string of letters and numbers. The session ID is kept as
 > the canonical identifier (machine); the model is human-readable. The leader
-> gets the model from `GET /session` → `model.id`.
+> gets the model from `GET /session` â†’ `model.id`.
 
 > **Note on auto-detection of own ID (leader):** the leader knows its session ID
 > because it is the session it is running (e.g. it appears in the
@@ -383,11 +330,11 @@ This way no one guesses or copies other people's IDs.
 > **Architecture (v1.8, corrected after GLM review 2026-08-19):** the
 > canonical wrapper is **`cross/send_message.ps1`** (Phase 5): it keeps the
 > legacy signature `-Destino -Texto [-NoReply] [-Puerto -Password]`, creates
-> an outbox entry (`Add-OutboxEntry`, §12.8) and delegates the actual send to
+> an outbox entry (`Add-OutboxEntry`, Â§12.8) and delegates the actual send to
 > the `cross send` CLI (outbox/audit/retries active). `-LegacyMode` switches
 > to the old direct-HTTP path (no outbox/audit/retries). In local projects,
 > `whiteboard/send_message.ps1` is a **legacy shim** that forwards to
-> `cross\send_message.ps1` — it is NOT a standalone implementation. Do not
+> `cross\send_message.ps1` â€” it is NOT a standalone implementation. Do not
 > look for a `whiteboard/send_message.ps1` that does direct HTTP: that
 > implementation lives inside `cross/send_message.ps1 -LegacyMode`.
 
@@ -475,10 +422,10 @@ Notes:
 > **v1.8 (advisor consensus 2026-08-19, after nemotron's experiment as leader):**
 > enhanced wrapper that adds two capabilities the basic wrapper (4e) lacks:
 > **retry with exponential backoff** (a failed send is retried automatically
-> instead of leaving the agent to fire repeated commands manually, §11.6) and
+> instead of leaving the agent to fire repeated commands manually, Â§11.6) and
 > **optional delivery verification** by polling the destination history for a
-> token (the root cause of nemotron's failures: HTTP 200 ≠ processed; the
-> message must be READ back from the destination history, §6).
+> token (the root cause of nemotron's failures: HTTP 200 â‰  processed; the
+> message must be READ back from the destination history, Â§6).
 > It keeps the mandatory auto-detection (RULE v1.4) and the ASCII no-BOM
 > payload write (CROSS_WINDOWS.md #1). Optional utility: the manual method
 > (4a-4c) and the basic wrapper (4e) remain valid.
@@ -547,13 +494,13 @@ Usage:
 ```
 
 Notes:
-- `-Token` + `-VerifWait`: poll the DESTINATION history (section 6) — the
+- `-Token` + `-VerifWait`: poll the DESTINATION history (section 6) â€” the
   only proof of processing; a bare HTTP 200/204 is NOT proof (nemotron
-  case, §11.3). **`-VerifWait` only takes effect when `-Token` is ALSO
-  given** — the token is what the poller looks for in the destination
+  case, Â§11.3). **`-VerifWait` only takes effect when `-Token` is ALSO
+  given** â€” the token is what the poller looks for in the destination
   history; passing `-VerifWait` without `-Token` verifies nothing.
 - Retries use exponential backoff (2s, 4s, 8s, ... capped at 30s): no more
-  streaks of failed manual commands (§11.6).
+  streaks of failed manual commands (Â§11.6).
 - Keep this file in `whiteboard/` next to `send_message.ps1` (4e).
 
 ### 4f. Minimal critical rules (fallback handshake, v1.8)
@@ -564,7 +511,7 @@ lines sufficient for any agent to operate without having read
 CROSS_TALK.md:
 
 ```
-PROTOCOLO CROSS-TALK v1.8 — CRITICAL RULES:
+PROTOCOLO CROSS-TALK v1.8 â€” CRITICAL RULES:
 1. Your ID and model are communicated by the leader (do not guess them).
 2. ALWAYS reply via API (prompt_async without noReply) to the leader's session.
 3. ACK first, then process: ACK:<token>:<your_ID>:<your_model>.
@@ -591,7 +538,7 @@ text and any agent can operate with the minimum.
 >    to send (external environment failure, the model does not have network
 >    tools, etc.) and ALWAYS notifying the leader in the chat that you could not send it.
 >    **v1.7 (TEST-E2E-85):** if the task message includes the ready-to-copy
->    script (§4d rule), copy it into your bash tool and execute it verbatim —
+>    script (Â§4d rule), copy it into your bash tool and execute it verbatim â€”
 >    do not rebuild the command from memory (models that do this break the
 >    PowerShell syntax or send nothing).
 > 2. Identify the sender by its **session ID** (e.g. `ses_AAAAAAAA`)
@@ -694,8 +641,8 @@ up when it arrives.
 > was stored in the leader's session (`user` without `time.completed`) but the
 > leader did NOT wake up: the server never generated `message=process`/`stream`
 > for its session. Confirmed by logs and controlled test (two identical
-> messages to the same session: `noReply: true` → no response; `noReply:
-> false` → processed and replied). The messages were only seen when manually reviewing the
+> messages to the same session: `noReply: true` â†’ no response; `noReply:
+> false` â†’ processed and replied). The messages were only seen when manually reviewing the
 > history. **Reinforced rule: to reply to the leader, ALWAYS send
 > with `prompt_async` (without `noReply`) or POST without `noReply`. Never use
 > `noReply: true` to deliver a pending reply or result.**
@@ -754,7 +701,7 @@ curl.exe -s -u "opencode:$password" "http://127.0.0.1:$port/session/$advisor/mes
 With this you can find out if:
 - the task message **reached it** (last `user` message),
 - the agent **started working** (there is `reasoning` or a half-done `assistant`),
-- **finished and replied** (last `assistant` says "Sent...") — if it replied
+- **finished and replied** (last `assistant` says "Sent...") â€” if it replied
   but it did not reach your session, it is the pitfall from section 5: ask it to
   send it via API,
 - or it simply **went blank / has no activity** (no `assistant` after the
@@ -790,7 +737,7 @@ else                   { Write-Host "SESSION GROWING -> still working, do not in
 ```
 
 > Quick alternative: the session summary also exposes the size
-> (`GET /session` → `tokens` and `summary`). If `tokens.output` or `summary`
+> (`GET /session` â†’ `tokens` and `summary`). If `tokens.output` or `summary`
 > change between readings, the agent is active.
 
 ### c) Wake up a stuck agent with "sigue"
@@ -849,9 +796,9 @@ curl.exe -s -X POST -u "opencode:$password" -H "Content-Type: application/json" 
   send it `sigue` (c).
 - **Final agreements:** same criterion, 3 minutes; advisors usually
   reply within seconds.
-- **Partition rule (v1.6.1, simplification):** messages with ACK →
-  **§12.3 governs completely** (120s, decision by two signals, no backoff).
-  Messages without ACK → **this section governs** (3 min). There is no need to interpret
+- **Partition rule (v1.6.1, simplification):** messages with ACK â†’
+  **Â§12.3 governs completely** (120s, decision by two signals, no backoff).
+  Messages without ACK â†’ **this section governs** (3 min). There is no need to interpret
   both rules simultaneously: the ACK is the boundary.
 - **Before any `sigue`:** always verify that the session is not growing between
   two readings (b). If it grows, wait and check again.
@@ -934,10 +881,10 @@ When sending a message that requires confirmation:
 
 > **Precedence v1.6 (2026-08-11):** this section describes the classic ACK
 > (v1.1). For messages with `requiere_ack=true` in the anti-sleep protocol, the
-> deadline and decision are set by **§12.3**: 120s FIXED, NO backoff — if the
+> deadline and decision are set by **Â§12.3**: 120s FIXED, NO backoff â€” if the
 > session grows, renew lease and wait (it is not a failure); if idle, apply
 > the circuit breaker (12.9). The 30/60/120 backoff in this section is
-> **replaced** by §12.3 for those messages; this section only continues
+> **replaced** by Â§12.3 for those messages; this section only continues
 > to apply to classic synchronous send retries (section 4b) and
 > tasks without `requiere_ack`.
 
@@ -962,7 +909,7 @@ CAPACITY failures (not just connectivity, which is reported in the chat itself, 
 NACK:<original_token>:<SENDER_SESSION_ID>:<SENDER_MODEL>:<REASON>
 ```
 
-**Enriched format (v1.7, external-reviewer BUG A correction — traceability of the rejected
+**Enriched format (v1.7, external-reviewer BUG A correction â€” traceability of the rejected
 message):** the NACK sender can add the original `msg_id` and `run_id`
 from the received envelope (12.1), so the leader correlates without ambiguity:
 
@@ -974,7 +921,7 @@ The engine's parser (`Parse-CrossAckText`) detects 6 segments and extracts
 `msg_id`/`run_id`; 4-5 segments remain valid (superset, no
 breaking change).
 
-**Closed reasons (fixed enumeration, no free text — the leader classifies them):**
+**Closed reasons (fixed enumeration, no free text â€” the leader classifies them):**
 
 | Reason | Meaning |
 |---|---|
@@ -1038,8 +985,8 @@ For tasks that both sessions must resolve and agree on:
 
 Tokens make verification unambiguous: they filter out noise
 (old or duplicate messages) and confirm that the other session reached
-agreement. Real verified example: proposal → the other session contributed 3 improvements
-→ integration → `ACUERDO-FINAL`.
+agreement. Real verified example: proposal â†’ the other session contributed 3 improvements
+â†’ integration â†’ `ACUERDO-FINAL`.
 
 ### 8.1. Analysis of large projects (do not exhaust context)
 
@@ -1067,13 +1014,13 @@ empty silently). model-d could not use Python until the human user told it
 the real path. Therefore:
 
 1. **Real Python:** the full path of your Python installation (see `where python` or `py -0p`)
-   — do NOT use bare `python` or `py`. Always invoke with the full path.
+   â€” do NOT use bare `python` or `py`. Always invoke with the full path.
 2. **curl:** `C:\WINDOWS\system32\curl.exe` (works as `curl.exe`).
 3. **git:** `C:\Program Files\Git\cmd\git.exe`.
 4. **CMake:** `C:\Program Files\CMake\bin\cmake.exe`.
 5. **GCC/G++ (MSYS2 UCRT64):** `C:\msys64\ucrt64\bin\g++.exe` / `gcc.exe`
    (real desktop build toolchain; see project AGENTS.md).
-6. **Send CLI:** `cross.ps1 send` or `cross.ps1 send --text "..." --dest ses_X` (auto-detects credentials; see §4d).
+6. **Send CLI:** `cross.ps1 send` or `cross.ps1 send --text "..." --dest ses_X` (auto-detects credentials; see Â§4d).
 
 > If the leader delivers a task that requires a tool, it must specify its
 > **full path** in the message (section 4d) and not assume the advisor will
@@ -1168,7 +1115,7 @@ Updated per round, not in real time. Suggested format:
 > advisors to report their availability WITHOUT being asked, so the leader
 > has a live dashboard and never wastes a round on a status check.
 
-**Format** (verified in ESTADO-88, 2026-08-19 — same as the task reply):
+**Format** (verified in ESTADO-88, 2026-08-19 â€” same as the task reply):
 
 ```
 ESTADO:sesion:modelo|DISPONIBLE|capacidad=<descripcion>
@@ -1179,7 +1126,7 @@ Values for the state field: `DISPONIBLE` | `OCUPADO` | `DESCANSANDO`.
 **Rules:**
 
 1. **Each advisor publishes `ESTADO:` in its own session history**
-   (via its own reply, or a self-send with `-NoReply` — no need to wake
+   (via its own reply, or a self-send with `-NoReply` â€” no need to wake
    anyone) **every `HEARTBEAT_INTERVAL_MIN` (5) minutes** while it is
    operative, or **immediately when its state changes** (e.g. goes OCUPADO
    with a task).
@@ -1187,18 +1134,18 @@ Values for the state field: `DISPONIBLE` | `OCUPADO` | `DESCANSANDO`.
    `GET /session/:id/message?limit=N` (section 6) and filtering lines
    matching `^ESTADO:`; the LATEST line per session is the current state.
    **Only the leader writes `whiteboard/estado_equipo.md`** (single writer,
-   rewritten on each change — the advisors publish `ESTADO:` in their own
+   rewritten on each change â€” the advisors publish `ESTADO:` in their own
    history but never write the dashboard file themselves).
 3. If the leader has no `ESTADO:` line for an advisor for > `STALE_THRESHOLD_MIN`
    (15) min, it is treated as `NO RESPONDE` and the leader follows the standard
    diagnosis (6.1) before declaring it down (11.5, provider vs. stuck distinction).
 4. Heartbeats are LOW PRIORITY: they must never be used as the primary
-   wake-up mechanism (that is `prompt_async`, golden rule §5.1/§12) and
+   wake-up mechanism (that is `prompt_async`, golden rule Â§5.1/Â§12) and
    must not generate ACK traffic. They are a presence/readiness signal for
    the leader's dashboard, not a delivery channel.
 
 **Dashboard suggestion** (`whiteboard/estado_equipo.md`, leader-maintained,
-rewritten on each change — single writer, avoids the R3 heartbeat.json race):
+rewritten on each change â€” single writer, avoids the R3 heartbeat.json race):
 
 ```
 # Estado del equipo (actualizado: <UTC>)
@@ -1216,7 +1163,7 @@ rewritten on each change — single writer, avoids the R3 heartbeat.json race):
 > with non-UTC local time.
 
 > This replaces the ad-hoc STATUS CHECK round (what nemotron ran as leader
-> with `noReply=true`, which never woke the advisors — their finding #1):
+> with `noReply=true`, which never woke the advisors â€” their finding #1):
 > with the heartbeat, availability is already known before any task dispatch.
 
 ## 11. Known issues and solutions
@@ -1237,23 +1184,23 @@ rewritten on each change — single writer, avoids the R3 heartbeat.json race):
    nemotron-3-ultra-free wrote the complete reply with its signature in its
    own chat but NEVER sent it via API, even after 3 nudges describing the
    method; it only worked when the leader sent the ready-to-copy script
-   verbatim (see §4d rule). openrouter/free breaks the PowerShell command
+   verbatim (see Â§4d rule). openrouter/free breaks the PowerShell command
    syntax (missing `)` errors) and also needs the script verbatim.
    **v1.7.1 finding (TEST-E2E-86):** openrouter/free STILL failed with the
    script (copied the source line as payload text, literal `` `n `` and
-   `$(Get-Date)` unexpanded); the **pre-built JSON fallback** (§4d) — leader
+   `$(Get-Date)` unexpanded); the **pre-built JSON fallback** (Â§4d) â€” leader
    writes the payload file, advisor runs one `curl --data-binary "@file"`
-   line — worked in 1 nudge.
+   line â€” worked in 1 nudge.
    **Guideline: from v1.7 on, the leader always embeds the ready-to-copy
-   script in the task message (§4d); if the advisor still fails, escalate
-   to the pre-built JSON fallback (§4d, v1.7.1) — do not assume the advisor
+   script in the task message (Â§4d); if the advisor still fails, escalate
+   to the pre-built JSON fallback (Â§4d, v1.7.1) â€” do not assume the advisor
    can build the curl/PowerShell command itself.**
    **v1.8 (ESTADO-88, 2026-08-19):** nemotron as leader sent its status
    check with `noReply=true` and the advisors never woke (their finding
    #1); the re-run by the leader with `prompt_async` + ready-to-copy
    script got 3/3 replies in minutes. Also: a send loop without `-m`
    timeout in curl hung the shell and truncated delivery to 1 of 3
-   advisors — always set `-m 30` or use the wrapper (4e.2).
+   advisors â€” always set `-m 30` or use the wrapper (4e.2).
 4. **Agents stuck with empty `assistant`:** verify with double reading (6.1b)
    and `sigue` (6.1c); do not fire `sigue` in a loop (wait ~30-60 s).
 5. **Provider down (does not respond even when requested):** it is not a stuck agent, it is
@@ -1313,10 +1260,10 @@ have multiple runs, messages, and attempts; they are NOT interchangeable:
 
 **`attempt` semantics (v1.6.1, external review correction):** `attempt` is
 the number of DELIVERIES of the logical message (`msg_id`). Rules:
-- **RETRY** → `attempt + 1` (it is a new delivery of the same `msg_id`).
-- **TRANSFER** (lease to successor) → `attempt + 1` (new delivery, even if
+- **RETRY** â†’ `attempt + 1` (it is a new delivery of the same `msg_id`).
+- **TRANSFER** (lease to successor) â†’ `attempt + 1` (new delivery, even if
   `session_id` changes).
-- **RESUME** (`sigue`) → does NOT increment `attempt` (it is not a new delivery: the
+- **RESUME** (`sigue`) â†’ does NOT increment `attempt` (it is not a new delivery: the
   session already had the message and is only continuing its context).
 - `max_hops=2` (12.5) and circuit breaker A/B/C (12.9) read this counter.
 
@@ -1336,7 +1283,7 @@ the number of DELIVERIES of the logical message (`msg_id`). Rules:
 > sending `sigue` is not retransmitting, and retransmitting without context does not resume.
 
 > **ENVELOPE-V2 (v1.9.0, Fase 1):** since v1.9.0 the engine adds a second,
-> structured line to the message body — `ENVELOPE-V2: {json}` (v2 envelope,
+> structured line to the message body â€” `ENVELOPE-V2: {json}` (v2 envelope,
 > see `cross/modules/cross-envelope.psm1`). The v1 envelope above is
 > UNCHANGED and remains the canonical format; v2 is an additional, validated
 > representation (`v=2`, `type` in {message,ack,nack}). `Parse-CrossAckText`
@@ -1385,14 +1332,14 @@ timeout: if the session grows, another window is waited for instead of declaring
 
 1. Is the session growing? (12.4a). If the model is generating (e.g. provider
    timeout with automatic retry, case 524 observed on 2026-08-11:
-   valid ACK at 323s after [504]→retry error): renew lease and wait
+   valid ACK at 323s after [504]â†’retry error): renew lease and wait
    ANOTHER cycle; the ACK will arrive. This does NOT count as an escalation failure.
-2. Session idle AND no ACK? → sleeping/dead → circuit breaker (12.9):
-   A transient → 1 idempotent retry; B recoverable → renew lease;
-   C permanent → escalation (12.6) → DLQ (12.7).
+2. Session idle AND no ACK? â†’ sleeping/dead â†’ circuit breaker (12.9):
+   A transient â†’ 1 idempotent retry; B recoverable â†’ renew lease;
+   C permanent â†’ escalation (12.6) â†’ DLQ (12.7).
 
 Finiteness rule: never more than 2 retry cycles to the same destination (12.9).
-Total wait is bounded (fixed deadline × 2 cycles); late ACK from a
+Total wait is bounded (fixed deadline Ã— 2 cycles); late ACK from a
 slow provider is tolerated ONLY if the session grows. A model that never
 replies is detected by idle session, not by "increasingly long timeout".
 
@@ -1400,8 +1347,8 @@ replies is detected by idle session, not by "increasingly long timeout".
 
 No PING/PONG messages (noise; R2 consensus). The leader checks presence with
 two separate `GET /session/:id` readings (6.1b) and/or by looking at
-`whiteboard/outbox.md`: if an `EN_VUELO` expires and the session is NOT growing →
-sleeping. If growing → renew lease and wait.
+`whiteboard/outbox.md`: if an `EN_VUELO` expires and the session is NOT growing â†’
+sleeping. If growing â†’ renew lease and wait.
 
 ### 12.5 Lease with successor (the task never goes without an owner)
 
@@ -1416,7 +1363,7 @@ available as explicit successor if designated). Rules:
   not a `sigue`; see RESUME/RETRY distinction in 6.1c and 12.1).
 - (c) If still `EN_VUELO` after the retry: REASSIGN to successor with
   `prompt_async`, same `msg_id` and note "lease transferred". `max_hops=2`.
-- (d) Exhausted: QUARANTINE → DLQ with human report.
+- (d) Exhausted: QUARANTINE â†’ DLQ with human report.
 
 ### 12.6 Escalation channel (whiteboard/escalated.md)
 
@@ -1433,16 +1380,16 @@ is already awake by other means. Application-level "magic packet"
 (Wake-on-LAN).
 
 > **CROSS coordination pattern: stigmergic wake-on-write (v1.6.1,
-> advisor consensus 2026-08-11).** This mechanism — shared file as
+> advisor consensus 2026-08-11).** This mechanism â€” shared file as
 > coordination channel, with writes as signals and `URGENTE|para=<ID>`
-> messages parseable by each agent when waking up and after each turn — is the
+> messages parseable by each agent when waking up and after each turn â€” is the
 > **state-shared coordination pattern developed for CROSS**. Stigmergic
 > coordination (signals in a shared space discovered by other agents) exists in the
 > literature; CROSS applies it in a particular way on markdown files with the
 > `URGENTE|para=<ID>` semantics described here. No equivalence is claimed nor
 > absence of equivalent in other protocols (A2A, MCP, ACP/ANP): it is documented
 > as the project's own pattern, with the Wake-on-LAN "magic packet" analogy
-> (patent WO2007024306A1) — binary, unidirectional, and only wakes up,
+> (patent WO2007024306A1) â€” binary, unidirectional, and only wakes up,
 > while ours is human-readable, bidirectional (any agent writes and reads) and
 > besides waking up it carries the message and its `msg_id` (idempotency).
 
@@ -1464,7 +1411,7 @@ silently.
 ### 12.8 Idempotency (whiteboard/idempotencia-procesados.md)
 
 **State machine (v1.6.1, external-reviewer corrections 2026-08-11 + F1-F4/O1):** each
-`msg_id` goes through states `CLAIMED` → `PROCESADO`. The `CLAIMED` state
+`msg_id` goes through states `CLAIMED` â†’ `PROCESADO`. The `CLAIMED` state
 covers the window between "check that it does not exist" and "finish processing" (which
 in an LLM lasts 30-90 s), avoiding the double-processing race condition:
 
@@ -1474,14 +1421,14 @@ in an LLM lasts 30-90 s), avoiding the double-processing race condition:
 
 **Append-only (v1.6.1, O1 external-reviewer):** the file is an append-only log (like the
 outbox), NOT editable in-place. Editing an existing line in PowerShell
-(`Get-Content` → modify in memory → `Set-Content`) is NOT atomic and creates
+(`Get-Content` â†’ modify in memory â†’ `Set-Content`) is NOT atomic and creates
 a race when two agents write simultaneously (e.g. the legitimate claimer
 writing `PROCESADO` while the leader does release). Therefore:
 
 - **CLAIM**: before processing, the receiver APPENDS
   `msg_id | timestamp_claim | modelo_claimer | CLAIMED_BY=ses_X` (EXACT
-  format, no extra spaces or variations — the CLI parser recognizes it).
-  If the last line for the `msg_id` is already `CLAIMED` or `PROCESADO` and active →
+  format, no extra spaces or variations â€” the CLI parser recognizes it).
+  If the last line for the `msg_id` is already `CLAIMED` or `PROCESADO` and active â†’
   skip (duplicate).
 - **PROCESADO**: do NOT rewrite the CLAIMED line: when finished, the receiver
   APPENDS a new line `msg_id | timestamp | modelo | PROCESADO`.
@@ -1491,7 +1438,7 @@ writing `PROCESADO` while the leader does release). Therefore:
   it does not write `PROCESADO`).
 - **Retry with CLAIMED (v1.6.1):** a RETRY is only triggered if the `msg_id` has NO
   line at all in the file, or if its last line is `CLAIMED_BY=ses_X`
-  AND session `ses_X` is idle (12.4, double reading). If `ses_X` grows →
+  AND session `ses_X` is idle (12.4, double reading). If `ses_X` grows â†’
   wait: the claimer is still processing. This replicates the lease at the
   receiver level.
 - The CLI parser reads the **LAST line** of each `msg_id` and that determines
@@ -1507,8 +1454,8 @@ only once.
 idempotent operations (a second processing does not produce a different effect).
 For NON-idempotent operations (e.g. the receiver modifies a file and
 dies BEFORE appending `PROCESADO`), retransmission would process twice:
-therefore **RECONCILE (12.10)** is required — verify the output file or
-effect before retransmitting — or confirmation of the effect. Universal
+therefore **RECONCILE (12.10)** is required â€” verify the output file or
+effect before retransmitting â€” or confirmation of the effect. Universal
 effectively-once is not claimed "by construction" (that would only be guaranteeable
 with distributed coordination which does not exist here).
 
@@ -1516,9 +1463,9 @@ with distributed coordination which does not exist here).
 
 Before sending "sigue", classify the failure:
 
-- A (transient): one-off timeout/retry → idempotent RETRY (once).
-- B (recoverable): session growing but slow → renew lease, wait.
-- C (permanent): not growing / stable error → REASSIGN successor or QUARANTINE.
+- A (transient): one-off timeout/retry â†’ idempotent RETRY (once).
+- B (recoverable): session growing but slow â†’ renew lease, wait.
+- C (permanent): not growing / stable error â†’ REASSIGN successor or QUARANTINE.
 
 Never more than 2 blind attempts to the same destination.
 
@@ -1529,12 +1476,12 @@ Never more than 2 blind attempts to the same destination.
 |---|---|---|
 | Max attempts (`MaxAttempts`) | 2 (`max_retries`) | config |
 | ACK wait timeout | 120 s (`default_ack_timeout_s`) | config / `--ack-timeout` |
-| Retry backoff | 2 s linear (`retry_backoff_s × attempt`) | config |
-| Lease | 3 min (`default_lease_minutes`), renewed 1× per attempt if destination grows | config |
+| Retry backoff | 2 s linear (`retry_backoff_s Ã— attempt`) | config |
+| Lease | 3 min (`default_lease_minutes`), renewed 1Ã— per attempt if destination grows | config |
 | "Growing" verification | 15 s (`session_growing_check_ms`), 2 message fingerprints | config |
 | ACK polling | every 3 s until deadline | engine |
-| Retriable HTTP | 0 (network/timeout), 408, 429, ≥500 | engine |
-| Non-retriable HTTP | 404 → `DEST_NOT_FOUND`/EXPIRADO; 401/403 → `AUTH_FAILED`/EXPIRADO | engine |
+| Retriable HTTP | 0 (network/timeout), 408, 429, â‰¥500 | engine |
+| Non-retriable HTTP | 404 â†’ `DEST_NOT_FOUND`/EXPIRADO; 401/403 â†’ `AUTH_FAILED`/EXPIRADO | engine |
 
 **NACK reason_code (v1.7, external-reviewer correction):** `NACK_TIMEOUT` (0/408/ACK_TIMEOUT),
 `NACK_RATE_LIMITED` (429), `NACK_DEST_NOT_FOUND` (404), `NACK_CONFIG_ERROR`
@@ -1544,9 +1491,9 @@ line** (`attempt=N`) before each send (external-reviewer BUG L correction): afte
 crash, `cross send` resumes from the attempt already made.
 
 Delivery engine state transitions:
-`EN_VUELO → CONFIRMADO` (ACK or `--no-wait`/no ACK required), `→ NACKED`
-(NACK with reason), `→ EXPIRADO` (404/401/403, non-retriable HTTP exhausted, or
-no ACK after max attempts → `ACK_TIMEOUT`). The scan (12.10) manages
+`EN_VUELO â†’ CONFIRMADO` (ACK or `--no-wait`/no ACK required), `â†’ NACKED`
+(NACK with reason), `â†’ EXPIRADO` (404/401/403, non-retriable HTTP exhausted, or
+no ACK after max attempts â†’ `ACK_TIMEOUT`). The scan (12.10) manages
 expired `EXPIRADO`/`EN_VUELO` with the ladder (12.11).
 
 ### 12.10 Recovery scan (RETRY/RESUME/RECONCILE/QUARANTINE)
@@ -1575,25 +1522,25 @@ around; model-d R3 adjustment). Classifies each expired message:
   opencode\log\opencode.log`, timestamps in UTC) looking for the advisor's
   `session.id` in the timeout interval. Classifies the failure:
   - `stream error ... [504]/[524]` or `connect timeout` / `ENOTFOUND` /
-    `Rate limit exceeded` → **PROVIDER failure, healthy agent**: the server
+    `Rate limit exceeded` â†’ **PROVIDER failure, healthy agent**: the server
     retries on its own; do NOT escalate, renew lease and wait (the ACK usually arrives).
-  - normal `exiting loop` / no error in the interval → **agent truly
-    sleeping or dead**: follow normal escalation (12.6 → DLQ).
-  - different `stream error` (auth, nonexistent model) → configuration
+  - normal `exiting loop` / no error in the interval â†’ **agent truly
+    sleeping or dead**: follow normal escalation (12.6 â†’ DLQ).
+  - different `stream error` (auth, nonexistent model) â†’ configuration
     error: report to human in DLQ.
   This step prevents false QUARANTINE from provider intermittency
   (observed: valid ACK at 323 s after 524 error with automatic retry).
-- **QUARANTINE**: if safety cannot be proven → DLQ with human report.
+- **QUARANTINE**: if safety cannot be proven â†’ DLQ with human report.
 
 NEVER blindly resend a non-idempotent step that may have mutated state.
 
 ### 12.11 Complete ladder (management order)
 
-Envelope (12.1) → Outbox (12.2) → ACK (12.3) → Passive presence (12.4) →
-Circuit breaker (12.9) → Lease+successor (12.5) → Scan (12.10, including
-server log diagnosis) → Escalation (12.6) → DLQ (12.7).
+Envelope (12.1) â†’ Outbox (12.2) â†’ ACK (12.3) â†’ Passive presence (12.4) â†’
+Circuit breaker (12.9) â†’ Lease+successor (12.5) â†’ Scan (12.10, including
+server log diagnosis) â†’ Escalation (12.6) â†’ DLQ (12.7).
 Idempotency (12.8) is cross-cutting. Escalation and DLQ are the last
-stages of the circuit breaker (C = permanent → escalation → DLQ).
+stages of the circuit breaker (C = permanent â†’ escalation â†’ DLQ).
 
 ### 12.12 Files used by v1.6 (all in whiteboard/)
 
@@ -1602,7 +1549,7 @@ stages of the circuit breaker (C = permanent → escalation → DLQ).
 - `escalated.md`: escalation channel `URGENTE|para=<ID>`.
 - `dlq-messages.md`: undelivered messages (UNREAD/RECIBIDO, flag).
 - `idempotencia-procesados.md`: append-only lifecycle log for each
-  msg_id (CLAIMED → PROCESADO / SUPERSEDED_BY); dedupe by last line.
+  msg_id (CLAIMED â†’ PROCESADO / SUPERSEDED_BY); dedupe by last line.
 
 ### 12.13 Accepted trade-offs (documented after external review, 2026-08-11)
 
@@ -1650,13 +1597,13 @@ it detects a NACK in `audit_log.md` not reflected, and `aviso-spof --apply` appe
 
   | outbox | session | diagnosis | action |
   |---|---|---|---|
-  | CONFIRMADO / audit ACK | — | `ACKED` | none |
-  | NACKED / audit NACK | — | `NACKED` | manage by reason (7.5/12.10) |
-  | EXPIRADO/TRANSFERIDO/QUARANTINE | — | `TERMINAL` | ladder (12.10/12.11) |
+  | CONFIRMADO / audit ACK | â€” | `ACKED` | none |
+  | NACKED / audit NACK | â€” | `NACKED` | manage by reason (7.5/12.10) |
+  | EXPIRADO/TRANSFERIDO/QUARANTINE | â€” | `TERMINAL` | ladder (12.10/12.11) |
   | EN_VUELO | lease expired | `EXPIRED` | scan (12.10) |
   | EN_VUELO | `busy` + growing | `WORKING` | wait (renew lease 12.4a) |
   | EN_VUELO | `busy` + idle | `ACKED_QUIETA` | investigate audit/outbox |
-  | EN_VUELO | `idle` + idle | `QUIETA_SIN_ACK` | circuit breaker 12.9 → escalate |
+  | EN_VUELO | `idle` + idle | `QUIETA_SIN_ACK` | circuit breaker 12.9 â†’ escalate |
   | EN_VUELO | `error` | `PROVIDER_DOWN` | renew lease and wait |
   | EN_VUELO | unverifiable | `UNKNOWN` | check port/server |
 
@@ -1668,9 +1615,9 @@ it detects a NACK in `audit_log.md` not reflected, and `aviso-spof --apply` appe
   + audit_log for that msg_id).
 - **`cross reconcile --msg msg_X --check-file PATH [--expected-token T]`:**
   verifies whether a deliverable reached its destination by searching for its token in the
-  output file. Verdicts: `CONFIRMED` (token in check-file → `mark_confirmed`),
-  `AMBIGUOUS` (check exists but without token → `investigate`), `NOT_FOUND`
-  (check does not exist → `retry`). Implements the RECONCILE step from 12.10.
+  output file. Verdicts: `CONFIRMED` (token in check-file â†’ `mark_confirmed`),
+  `AMBIGUOUS` (check exists but without token â†’ `investigate`), `NOT_FOUND`
+  (check does not exist â†’ `retry`). Implements the RECONCILE step from 12.10.
 - **`cross aviso-spof [--apply] [--for ses_X]`:** implements the
   SPOF mitigation from 12.13. Scans expired `EN_VUELO` entries: if `dest` is my session and it is
   idle, appends `AVISO-SPOF` to `escalated.md` (only with `--apply`); if it belongs to
@@ -1694,9 +1641,9 @@ READ layer of 12.14 with the actions the leader executes per 7.5 and
   `--for-run-id` is passed: `msg_id` and `run_id` go together, and the parser distinguishes
   the enriched (6 fields after `NACK:`) from the generic. The audit stores the reason.
 - **`cross resume --to ses_X --task-id TX [--from] [--text]`:** implements the
-  RESUME from 12.10 (§6.1c). Sends `prompt_async` to the same session with
+  RESUME from 12.10 (Â§6.1c). Sends `prompt_async` to the same session with
   continuation instruction; does NOT create new `msg_id`, does NOT touch the outbox, does NOT
-  increment `attempt` (§12.1).
+  increment `attempt` (Â§12.1).
 - **`cross restart-task --msg-id X [--to] [--text]`:** implements the RETRY from
   12.10 with the SAME `msg_id` (idempotent): attempt+1 persisted in the outbox,
   status reset to `EN_VUELO`. Errors: `OUTBOX_MSG_NOT_FOUND` /
@@ -1743,15 +1690,15 @@ files (audit, escalated, DLQ, outbox); they do not rewrite previous lines.
 
 - **Envelope JSON v2 exclusive (Fase 3, v2.0):** endgame of improvement #1
   (GLM-5.3 design, "Sobre estructurado JSON"). The engine currently accepts
-  v2 first and falls back to v1 (see §12.1 ENVELOPE-V2 note, v1.9.0). Fase 3
+  v2 first and falls back to v1 (see Â§12.1 ENVELOPE-V2 note, v1.9.0). Fase 3
   makes v2 the ONLY format: `Parse-CrossAckText` (6+ v1 regexes, legacy
   special cases E1/firma incompleta) is removed, and the contract becomes
-  fully validated (`v=2`, `type` ∈ {message,ack,nack}, mandatory non-empty
-  `msg_id`/`timestamp`, `requires_ack` bool — invariants already enforced by
+  fully validated (`v=2`, `type` âˆˆ {message,ack,nack}, mandatory non-empty
+  `msg_id`/`timestamp`, `requires_ack` bool â€” invariants already enforced by
   the T-fuzz fuzzer). **Dependencies:** Fase 2 deprecation first (v1.10,
   warning on v1 messages so advisors migrate), plus live coordination with
   the 3 advisors (MIMO, NEMOTRON, BIG PICKLE) since they still reply in v1
-  formats. Breaking change → v2.0 versioning.
+  formats. Breaking change â†’ v2.0 versioning.
 
 - **Long-polling / SSE:** if the OpenCode Desktop API ever supports them,
   replace active polling (section 6) with these mechanisms to reduce

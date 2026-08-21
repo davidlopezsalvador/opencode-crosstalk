@@ -9,6 +9,37 @@ mixed current specification with changelog and PowerShell pitfalls).
 
 ## Versions
 
+### v1.16.0 (2026-08-21) - F1-F5 reliability hardening (wire protocol unchanged)
+
+Origin: Claude diagnosis validated by GLM-5.3, implemented by leader OX ALPHA,
+verified 5/5 CORRECTO by the advisor council (MIMO, HY3, BIG PICKLE, NEMOTRON,
+MUSE SPARK) on the canonical repo. Plan: whiteboard/14 + 18 (CROSS workspace).
+
+- **F1 TOCTOU**: `New-CrossClaim` / `New-CrossRelease` / `New-CrossDone` now wrap
+  read->verify->write in the state-file global mutex (`WaitOne(30000)` +
+  try/finally release). New error `LOCK_TIMEOUT`. Two concurrent claims of the
+  same msg_id now yield exactly one winner (test `T-idempotencia-race.ps1`,
+  cross-process via Start-Job, 8/8).
+- **F2 Port discovery**: both `server ready.*url:` regexes hardened to
+  `[^\r\n]*` (no line crossing) taking the LAST match (most recent start);
+  all 9 `Resolve-CrossEndpoint` returns now include `source` and
+  `degraded = (regex|scan)`.
+- **F3 Portability**: new exported `Get-CrossCurlCommand` resolves curl.exe/curl
+  per platform with actionable CURL_NOT_FOUND; replaced at all call-sites
+  (Import-CrossConfig, Test-CrossHealthRaw netrc/no-netrc, Invoke-CrossApi).
+- **F4 v1 deprecation**: `Parse-CrossAckText` emits a once-per-process DEPRECATED
+  warning and counts usage (`Get-CrossV1Usage`, exposed as `v1_ack_parse_count`
+  in metrics and a `v1_deprecation` check in doctor). Removal planned v1.17.
+- **F5 Hard total cap**: `New-CrossDelivery -MaxTotalWaitSec 600` (absolute
+  deadline; lease renewals count toward it). On exhaustion: outbox ESTADO=DLQ,
+  DLQ file line with flag TOTAL_TIMEOUT, result err=TOTAL_TIMEOUT.
+  `TOTAL_TIMEOUT` added to valid dlq flags.
+- **Docs**: QUICKSTART.md added; CROSS_TALK.md intro de-changelogged (history
+  lives here); README/llms.txt point LLM agents to AGENTS.md bootstrap.
+
+Tests: suite 7098 pass / 0 fail across 35 suites, including new
+T-idempotencia-race.ps1 (8 checks) and T-v1-deprecation.ps1 (5 checks);
+T-doctor updated to expect the new doctor check (7 checks).
 ### v1.14.0 (2026-08-20) — Prometheus export + netrc + diagrama README (compatible)
 
 Design origin: external review (GLM-5.3), improvements #6 "Exportación de
