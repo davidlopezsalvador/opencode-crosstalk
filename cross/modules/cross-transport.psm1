@@ -215,7 +215,9 @@ $script:PortFromLogWarned = $false
         # level=info: visible with CROSS_DIAG=info; silent by default so callers
         # capturing stderr under EAP=Stop are not broken (PS5.1 native stderr quirk)
         Write-CrossDiag -Level info -Message 'DEPRECATED: Get-CrossPortFromLog scrapes main.log and will be removed in v1.18'
-    }function Get-CrossPortFromLog {
+    }
+
+function Get-CrossPortFromLog {
     $logsDir = Expand-Path ([Environment]::GetEnvironmentVariable('CROSS_DESKTOP_LOGS_DIR'))
     if (-not $logsDir) {
         $config = Get-CrossConfig
@@ -256,7 +258,8 @@ $script:PortFromLogWarned = $false
         $content = Get-Content -LiteralPath $mainLog -Raw
         # F2 (v1.16): see above.
         $ms = [regex]::Matches($content, "server ready[^\r\n]*url: 'http://127\.0\.0\.1:(\d+)'")
-        if ($ms.Count -gt 0) { return [int]$ms[$ms.Count - 1].Groups[1].Value }    } catch {}
+        if ($ms.Count -gt 0) { return [int]$ms[$ms.Count - 1].Groups[1].Value }
+    } catch {}
     return $null
 }
 
