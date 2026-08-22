@@ -16,20 +16,34 @@ jobs:
         shell: pwsh
         run: |
           $totalP = 0; $totalF = 0
+          $results = New-Object System.Collections.ArrayList
           Get-ChildItem cross\tests\T-*.ps1 | ForEach-Object {
             $out = (powershell.exe -NoProfile -ExecutionPolicy Bypass -File $_.FullName 2>&1) -join "`n"
             if ($out -match 'RESULT: (\d+) pass, (\d+) fail') {
               $totalP += [int]$Matches[1]; $totalF += [int]$Matches[2]
               Write-Host ("{0}: RESULT: {1} pass, {2} fail" -f $_.Name, $Matches[1], $Matches[2])
-              @($out -split "`n") | Where-Object { $_ -match '^\s*FAIL' } | ForEach-Object { Write-Host ("    {0}" -f $_.Trim()) }
+              @($out -split "`n") | Where-Object { $_ -match '^\s*FAIL' } | ForEach-Object {
+                Write-Host ("    {0}" -f $_.Trim())
+                [void]$results.Add($_.Trim())
+              }
             } else {
               Write-Host ("{0}: NO RESULT - output:" -f $_.Name)
               ($out -split "`n") | Select-Object -Last 8 | ForEach-Object { Write-Host ("    {0}" -f $_) }
               $totalF++
+              [void]$results.Add("NO RESULT in $($_.Name)")
             }
           }
           Write-Host ("TOTAL: {0} pass, {1} fail" -f $totalP, $totalF)
+          Set-Content -Path ci-results.txt -Value (("WINDOWS total={0} fail={1}" -f $totalP, $totalF) + (($results | ForEach-Object { "`n" + $_ })) -join '') -Encoding utf8
           if ($totalF -gt 0) { exit 1 }
+
+      - name: Upload diagnostics (windows)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-results-windows
+          path: ci-results.txt
+          if-no-files-found: ignore
 
   # D4 (v1.17): validate F3/cross-ipc on Linux - advisory file lock, curl resolution,
   # config discovery. Only server-independent suites run here (no OpenCode Desktop).
@@ -53,6 +67,7 @@ jobs:
         shell: pwsh
         run: |
           $totalP = 0; $totalF = 0
+          $results = New-Object System.Collections.ArrayList
           # D4: only suites that need no OpenCode Desktop server.
           # T-idempotencia-race validates the Unix advisory file lock cross-process.
           $suites = @('T-cli', 'T-port', 'T-ipc', 'T-whoami', 'T-idempotencia-race')
@@ -64,12 +79,25 @@ jobs:
               $p = [int]$Matches[1]; $f = [int]$Matches[2]
               $totalP += $p; $totalF += $f
               Write-Host ("{0}: RESULT: {1} pass, {2} fail" -f $suite, $p, $f)
-              @($out -split "`n") | Where-Object { $_ -match '^\s*FAIL' } | ForEach-Object { Write-Host ("    {0}" -f $_.Trim()) }
+              @($out -split "`n") | Where-Object { $_ -match '^\s*FAIL' } | ForEach-Object {
+                Write-Host ("    {0}" -f $_.Trim())
+                [void]$results.Add($_.Trim())
+              }
             } else {
               Write-Host ("{0}: NO RESULT - output:" -f $suite)
-              ($out -split "`n") | Select-Object -Last 8 | ForEach-Object { Write-Host ("    {0}" -f $_) }
+              ($out -split "`n") | Select-Object -Last 8 | ForEach-Object { Write-Host ("    {0}" -f $_) ; [void]$results.Add($_) }
               $totalF++
+              [void]$results.Add("NO RESULT in $suite")
             }
           }
           Write-Host ("UBUNTU TOTAL: {0} pass, {1} fail" -f $totalP, $totalF)
+          Set-Content -Path ci-results-ubuntu.txt -Value (("UBUNTU total={0} fail={1}" -f $totalP, $totalF) + (($results | ForEach-Object { "`n" + $_ })) -join '') -Encoding utf8
           if ($totalF -gt 0) { exit 1 }
+
+      - name: Upload diagnostics (ubuntu)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-results-ubuntu
+          path: ci-results-ubuntu.txt
+          if-no-files-found: ignore
