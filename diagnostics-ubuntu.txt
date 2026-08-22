@@ -1,0 +1,25 @@
+ubuntu total=19 fail=4
+OUT: SKIP  9 server-dependent scenarios: no OpenCode Desktop server logs/password in this environment (publish template)
+OUT: == T-cli: health ==
+OUT: SKIP  health: no server (publish template)
+OUT: == T-cli: whoami ==
+OUT: [31;1mJoin-Path: [0m/home/runner/work/opencode-crosstalk/opencode-crosstalk/cross/tests/T-cli.ps1:26[0m
+OUT: [31;1m[0m[36;1mLine |[0m
+OUT: [31;1m[0m[36;1m[36;1m  26 | [0m     $tmp = Join-Path [36;1m$env:TEMP[0m ("cross_cli_" + [System.Guid]::NewGuid …[0m
+OUT: [31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m                      ~~~~~~~~~[0m
+OUT: [31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mCannot bind argument to parameter 'Path' because it is null.[0m
+NO RESULT in T-cli
+OUT: == T-port: well-known round-trip (USERPROFILE aislado) ==
+OUT: [31;1mJoin-Path: [0m/home/runner/work/opencode-crosstalk/opencode-crosstalk/cross/tests/T-port.ps1:20[0m
+OUT: [31;1m[0m[36;1mLine |[0m
+OUT: [31;1m[0m[36;1m[36;1m  20 | [0m $isoUser = Join-Path [36;1m$env:TEMP[0m ('cross_wk_user_' + [System.Guid]::New …[0m
+OUT: [31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m                      ~~~~~~~~~[0m
+OUT: [31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mCannot bind argument to parameter 'Path' because it is null.[0m
+NO RESULT in T-port
+OUT: [31;1mJoin-Path: [0m/home/runner/work/opencode-crosstalk/opencode-crosstalk/cross/tests/T-whoami.ps1:42[0m
+OUT: [31;1m[0m[36;1mLine |[0m
+OUT: [31;1m[0m[36;1m[36;1m  42 | [0m $tmp = Join-Path [36;1m$env:TEMP[0m ('cross_twhoami_' + [System.Guid]::NewGuid …[0m
+OUT: [31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m                  ~~~~~~~~~[0m
+OUT: [31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mCannot bind argument to parameter 'Path' because it is null.[0m
+NO RESULT in T-whoami
+FAIL  re-claim same owner idempotent
