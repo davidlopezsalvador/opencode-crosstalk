@@ -25,9 +25,15 @@ OpenCode Desktop runs a local HTTP server (`http://127.0.0.1:PORT`) that exposes
 
 ### Prerequisites
 
-- Windows with PowerShell 5.1+
+- PowerShell 5.1+ (Windows) or PowerShell 7+ (Windows / Linux / macOS / WSL)
 - [OpenCode Desktop](https://opencode.ai) running with at least 2 open sessions
-- `curl.exe` (ships with Windows)
+- `curl` (built into Windows 10+; standard on Unix)
+
+> **Platform support:** Windows is the primary, fully-tested platform. Linux /
+> macOS / WSL work through the cross-platform layer in `cross-ipc.psm1`
+> (named mutex on Windows; advisory file lock on Unix — exclusive in
+> practice, not a POSIX `flock()`). The test suite runs server-independent
+> suites on CI (`windows-latest`); Unix is supported but less battle-tested.
 
 ### Setup
 
