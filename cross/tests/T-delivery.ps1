@@ -4,6 +4,7 @@ $ErrorActionPreference = 'Stop'
 $mod = Join-Path $PSScriptRoot '..\modules\cross-delivery.psm1'
 Import-Module $mod -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-state.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\cross-envelope.psm1') -Force
 
 $pass = 0; $fail = 0
 function Assert-True {
@@ -40,60 +41,57 @@ $env2 = Format-CrossEnvelope -MsgId 'm' -RequiereAck $false
 Assert-True ($env2 -match 'requiere_ack=false') 'requiere_ack=false' $env2
 
 Write-Host "== T-delivery: ACK parsing =="
-$p = Parse-CrossAckText 'ACK:PROPUESTA-R1:ses_BBB:model-b'
-Assert-True ($p.ack) 'ACK detected' ''
+$v2a = '{"v":2,"type":"ack","token":"PROPUESTA-R1","emitter":"ses_BBB","model":"model-b","msg_id":"m1","timestamp":"2026-08-12T00:00:00Z"}'
+$p = Parse-CrossEnvelope $v2a
+Assert-True ($p.valid -and $p.type -eq 'ack') 'v2 ACK detected' "$($p.valid)|$($p.type)"
 Assert-True ($p.token -eq 'PROPUESTA-R1') 'ACK token' $p.token
-Assert-True ($p.emisor -eq 'ses_BBB') 'ACK sender' $p.emisor
-Assert-True ($p.modelo -eq 'model-b') 'ACK model' $p.modelo
-$p2 = Parse-CrossAckText 'ACK:TOKEN:ses_CCC'
-Assert-True ($p2.ack -and $p2.emisor -eq 'ses_CCC' -and -not $p2.modelo) 'ACK without model tolerated' ''
-$p3 = Parse-CrossAckText 'x ACK:MI-TOKEN:ses_A:m1:ses_B:m2'
-Assert-True ($p3.token -eq 'MI-TOKEN:ses_A:m1' -and $p3.emisor -eq 'ses_B' -and $p3.modelo -eq 'm2') 'ACK with token suffix (5 segments)' "$($p3.token)|$($p3.emisor)|$($p3.modelo)"
+Assert-True ($p.emitter -eq 'ses_BBB') 'ACK emitter' $p.emitter
+Assert-True ($p.model -eq 'model-b') 'ACK model' $p.model
+$v2b = '{"v":2,"type":"ack","token":"TOKEN","emitter":"ses_CCC","msg_id":"m0","timestamp":"2026-08-12T00:00:00Z"}'
+$p2 = Parse-CrossEnvelope $v2b
+Assert-True ($p2.valid -and $p2.type -eq 'ack' -and $p2.model -eq '') 'ACK without model tolerated' "$($p2.model)"
+$v2c = 'ENVELOPE-V2: {"v":2,"type":"ack","token":"MI-TOKEN","emitter":"ses_A","model":"m1","msg_id":"m1","timestamp":"2026-08-12T00:00:00Z"} preamble'
+$p3 = Parse-CrossEnvelope $v2c
+Assert-True ($p3.valid -and $p3.token -eq 'MI-TOKEN' -and $p3.emitter -eq 'ses_A' -and $p3.model -eq 'm1') 'ENVELOPE-V2 prefixed line parses' "$($p3.token)|$($p3.emitter)"
 
 Write-Host "== T-delivery: E1 - real ACK variants (E2E finding) =="
-$e1a = Parse-CrossAckText 'MODEL-A E2E OK. Firma: TOKEN:MSG-c9d8a9ee7451:ses_BBBB:model-a'
-Assert-True ($e1a.ack -and $e1a.token -eq 'MSG-c9d8a9ee7451' -and $e1a.emisor -eq 'ses_BBBB' -and $e1a.modelo -eq 'model-a') 'E1: TOKEN:MSG-... signature with sender/model' "$($e1a.token)|$($e1a.emisor)|$($e1a.modelo)"
-$e1b = Parse-CrossAckText 'E2E MODEL-F: ... token MSG-1913cf464d20) ...'
-Assert-True ($e1b.ack -and $e1b.token -eq 'MSG-1913cf464d20') 'E1: MSG-... token in middle of text' "$($e1b.token)"
-$e1c = Parse-CrossAckText 'TAREA-E2E:ACK:ses_BBBB:model-b'
-Assert-True ($e1c.ack -and $e1c.token -eq 'ses_BBBB' -and $e1c.emisor -eq 'model-b') 'E1: :ACK: preceded by colon' "$($e1c.token)|$($e1c.emisor)"
-$e1d = Parse-CrossAckText 'normal response without MSG tokens'
-Assert-True (-not $e1d.ack -and -not $e1d.nack) 'E1: normal text still not ack' ''
-$e1e = Parse-CrossAckText 'Firma: TOKEN:MSG-c9d8a9ee7451:ses_A:m1'
-Assert-True ($e1e.ack -and $e1e.token -eq 'MSG-c9d8a9ee7451' -and $e1e.emisor -eq 'ses_A') 'E1: TOKEN: at start with sender' "$($e1e.token)|$($e1e.emisor)"
+# D1 (v1.17): los formatos v1 libres (TOKEN:MSG-..., :ACK:, texto suelto) ya NO se parsean.
+# El engine v2 solo reconoce envelope JSON; texto normal nunca es ack.
+$e1d = Parse-CrossEnvelope 'normal response without MSG tokens'
+Assert-True (-not $e1d.valid) 'plain text is NOT a valid v2 envelope' ''
+$e1x = Parse-CrossEnvelope 'Firma: TOKEN:MSG-c9d8a9ee7451:ses_A:m1'
+Assert-True (-not $e1x.valid) 'v1 free-text signature is rejected by v2 parser' ''
 
 Write-Host "== T-delivery: NACK parsing =="
-$n = Parse-CrossAckText 'NACK:PROPUESTA-R1:ses_BBB:model-b:CAPACITY'
-Assert-True ($n.nack) 'NACK detected' ''
+$v2n = New-CrossNackJson -Token 'PROPUESTA-R1' -Emitter 'ses_BBB' -Model 'model-b' -Reason 'CAPACITY' -MsgId 'm1'
+$n = Parse-CrossEnvelope $v2n
+Assert-True ($n.valid -and $n.type -eq 'nack') 'v2 NACK detected' "$($n.valid)|$($n.type)"
 Assert-True ($n.token -eq 'PROPUESTA-R1') 'NACK token' $n.token
-Assert-True ($n.razon -eq 'CAPACITY') 'NACK closed reason' $n.razon
-$n2 = Parse-CrossAckText 'NACK:TK:ses_A:PROVIDER_DOWN'
-Assert-True ($n2.nack -and $n2.razon -eq 'PROVIDER_DOWN') 'NACK 4 segments -> reason last' $n2.razon
-$n3 = Parse-CrossAckText 'NACK:TK:ses_A:model-b:CAPACITY:msg_123:RUN_456'
-Assert-True ($n3.nack -and $n3.razon -eq 'CAPACITY' -and $n3.emisor -eq 'ses_A' -and $n3.modelo -eq 'model-b' -and $n3.token -eq 'TK') 'enriched NACK (6 segments) -> correct reason' "$($n3.token)|$($n3.emisor)|$($n3.modelo)|$($n3.razon)"
+Assert-True ($n.reason -eq 'CAPACITY') 'NACK closed reason' $n.reason
+$n2 = Parse-CrossEnvelope (New-CrossNackJson -Token 'TK' -Emitter 'ses_A' -Reason 'PROVIDER_DOWN' -MsgId 'm0')
+Assert-True ($n2.valid -and $n2.reason -eq 'PROVIDER_DOWN') 'NACK minimal fields' $n2.reason
+$n3 = Parse-CrossEnvelope (New-CrossNackJson -Token 'TK' -Emitter 'ses_A' -Model 'model-b' -Reason 'CAPACITY' -MsgId 'msg_123' -RunId 'RUN_456')
+Assert-True ($n3.reason -eq 'CAPACITY' -and $n3.emitter -eq 'ses_A' -and $n3.model -eq 'model-b' -and $n3.token -eq 'TK') 'enriched NACK json -> correct fields' "$($n3.token)|$($n3.emitter)|$($n3.model)"
 Assert-True ($n3.msg_id -eq 'msg_123' -and $n3.run_id -eq 'RUN_456') 'enriched NACK -> msg_id/run_id' "$($n3.msg_id)|$($n3.run_id)"
-$n4 = Parse-CrossAckText 'NACK:MI-TOKEN:part:ses_A:model-b:CAPACITY'
-Assert-True ($n4.nack -and $n4.token -eq 'MI-TOKEN:part' -and $n4.emisor -eq 'ses_A' -and $n4.razon -eq 'CAPACITY') 'NACK with token suffix (5 segments)' "$($n4.token)|$($n4.emisor)|$($n4.razon)"
+$n4 = Parse-CrossEnvelope (New-CrossNackJson -Token 'MI-TOKEN:part' -Emitter 'ses_A' -Model 'model-b' -Reason 'CAPACITY' -MsgId 'm4')
+Assert-True ($n4.valid -and $n4.token -eq 'MI-TOKEN:part' -and $n4.emitter -eq 'ses_A' -and $n4.reason -eq 'CAPACITY') 'NACK with colon inside token tolerated' "$($n4.token)"
 
 Write-Host "== T-delivery: protocol handshake parsing =="
-$h = Parse-CrossAckText 'entendido ACK-PROTOCOLO:1.6.1 ok'
-Assert-True ($h.protocolo -and $h.token -eq '1.6.1') 'ACK-PROTOCOLO:1.6.1' $h.token
-$h2 = Parse-CrossAckText 'NACK-PROTOCOLO:2.0'
-Assert-True ($h2.protocolo -and $h2.razon -eq 'NACK-PROTOCOLO') 'NACK-PROTOCOLO' ''
+# D1 (v1.17): protocol handshake moved out of the delivery parser scope (cross-handshake.psm1)
 
 Write-Host "== T-delivery: no ack in normal text =="
-$np = Parse-CrossAckText 'normal response'
-Assert-True (-not $np.ack -and -not $np.nack -and -not $np.protocolo) 'normal text is not ack' ''
+$np = Parse-CrossEnvelope 'normal response'
+Assert-True (-not $np.valid) 'normal text is not an envelope' ''
 
 Write-Host "== T-delivery: engine -> ACK success =="
 New-Fixture
-$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 1 -SendFn { param($s,$b) @{ status = 204; body = '' } } -ReadFn { param($s) @(@{ role = 'user'; text = 'ACK:T1:ses_X:m1' }) } -SleepFn { param($ms) }
+$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 1 -SendFn { param($s,$b) @{ status = 204; body = '' } } -ReadFn { param($s) @(@{ role = 'user'; text = (New-CrossAckJson -Token 'T1' -Emitter 'ses_X' -Model 'm1' -MsgId 'msg_f3') }) } -SleepFn { param($ms) }
 Assert-True ($res.ok -and $res.state -eq 'CONFIRMADO' -and $res.ack) 'delivery with ACK -> CONFIRMADO' ($res | ConvertTo-Json -Compress)
 Assert-True ((Get-OutboxLine) -match 'ESTADO=CONFIRMADO') 'outbox ESTADO=CONFIRMADO' (Get-OutboxLine)
 
 Write-Host "== T-delivery: engine -> NACK =="
 New-Fixture
-$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 1 -SendFn { param($s,$b) @{ status = 204; body = '' } } -ReadFn { param($s) @(@{ role = 'user'; text = 'NACK:T1:ses_X:m1:CAPACITY' }) } -SleepFn { param($ms) }
+$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 1 -SendFn { param($s,$b) @{ status = 204; body = '' } } -ReadFn { param($s) @(@{ role = 'user'; text = (New-CrossNackJson -Token 'T1' -Emitter 'ses_X' -Reason 'CAPACITY' -MsgId 'msg_f3') }) } -SleepFn { param($ms) }
 Assert-True (-not $res.ok -and $res.err -eq 'NACK' -and $res.state -eq 'NACKED') 'NACK -> NACKED' ($res | ConvertTo-Json -Compress)
 Assert-True ($res.reason -eq 'CAPACITY') 'NACK reason propagated' $res.reason
 Assert-True ((Get-OutboxLine) -match 'ESTADO=NACKED') 'outbox ESTADO=NACKED' (Get-OutboxLine)
@@ -123,7 +121,7 @@ New-Fixture
 $attempts = 0
 $sendFn = { param($s,$b) $script:sendCalls++; if ($script:sendCalls -eq 1) { @{ status = 500; body = '' } } else { @{ status = 204; body = '' } } }
 $script:sendCalls = 0
-$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 2 -SendFn $sendFn -ReadFn { param($s) @(@{ role = 'user'; text = 'ACK:T1:ses_X:m1' }) } -SleepFn { param($ms) }
+$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 2 -SendFn $sendFn -ReadFn { param($s) @(@{ role = 'user'; text = (New-CrossAckJson -Token 'T1' -Emitter 'ses_X' -Model 'm1' -MsgId 'msg_f3') }) } -SleepFn { param($ms) }
 Assert-True ($res.ok -and $res.state -eq 'CONFIRMADO') '500 -> retry -> CONFIRMADO' ($res | ConvertTo-Json -Compress)
 Assert-True ($script:sendCalls -eq 2) '2 attempts made' $script:sendCalls
 
@@ -143,7 +141,7 @@ Write-Host "== T-delivery: engine -> 429 retry -> ACK =="
 New-Fixture
 $script:sendCalls = 0
 $sendFn = { param($s,$b) $script:sendCalls++; if ($script:sendCalls -eq 1) { @{ status = 429; body = '' } } else { @{ status = 204; body = '' } } }
-$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 2 -SendFn $sendFn -ReadFn { param($s) @(@{ role = 'user'; text = 'ACK:T1:ses_X:m1' }) } -SleepFn { param($ms) }
+$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 2 -SendFn $sendFn -ReadFn { param($s) @(@{ role = 'user'; text = (New-CrossAckJson -Token 'T1' -Emitter 'ses_X' -Model 'm1' -MsgId 'msg_f3') }) } -SleepFn { param($ms) }
 Assert-True ($res.ok -and $res.state -eq 'CONFIRMADO') '429 -> retry -> CONFIRMADO' ($res | ConvertTo-Json -Compress)
 Assert-True ($script:sendCalls -eq 2) '429: 2 attempts' $script:sendCalls
 
@@ -151,7 +149,7 @@ Write-Host "== T-delivery: engine -> network timeout (0) retry -> ACK =="
 New-Fixture
 $script:sendCalls = 0
 $sendFn = { param($s,$b) $script:sendCalls++; if ($script:sendCalls -eq 1) { @{ status = 0; body = '' } } else { @{ status = 204; body = '' } } }
-$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 2 -SendFn $sendFn -ReadFn { param($s) @(@{ role = 'user'; text = 'ACK:T1:ses_X:m1' }) } -SleepFn { param($ms) }
+$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 2 -SendFn $sendFn -ReadFn { param($s) @(@{ role = 'user'; text = (New-CrossAckJson -Token 'T1' -Emitter 'ses_X' -Model 'm1' -MsgId 'msg_f3') }) } -SleepFn { param($ms) }
 Assert-True ($res.ok -and $res.state -eq 'CONFIRMADO') 'network timeout (0) -> retry -> CONFIRMADO' ($res | ConvertTo-Json -Compress)
 
 Write-Host "== T-delivery: engine -> 401 AUTH_FAILED (no retry) =="
@@ -168,7 +166,7 @@ Assert-True ($res.reason_code -eq 'NACK_TIMEOUT') 'ACK_TIMEOUT -> reason_code NA
 
 Write-Host "== T-delivery: enriched NACK propagated =="
 New-Fixture
-$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 1 -SendFn { param($s,$b) @{ status = 204; body = '' } } -ReadFn { param($s) @(@{ role = 'user'; text = 'NACK:T1:ses_X:m1:CAPACITY:msg_f3:R1' }) } -SleepFn { param($ms) }
+$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 1 -SendFn { param($s,$b) @{ status = 204; body = '' } } -ReadFn { param($s) @(@{ role = 'user'; text = (New-CrossNackJson -Token 'T1' -Emitter 'ses_X' -Model 'm1' -Reason 'CAPACITY' -MsgId 'msg_f3' -RunId 'R1') }) } -SleepFn { param($ms) }
 Assert-True (-not $res.ok -and $res.state -eq 'NACKED' -and $res.reason -eq 'CAPACITY') 'enriched NACK -> NACKED CAPACITY' ($res | ConvertTo-Json -Compress)
 Assert-True ($res.nack_msg_id -eq 'msg_f3' -and $res.nack_run_id -eq 'R1') 'enriched NACK -> msg_id/run_id in result' "$($res.nack_msg_id)|$($res.nack_run_id)"
 
@@ -193,7 +191,7 @@ Write-Host "== T-delivery: attempt persisted in outbox (BUG L) =="
 New-Fixture
 $script:sendCalls = 0
 $sendFn = { param($s,$b) $script:sendCalls++; if ($script:sendCalls -eq 1) { @{ status = 500; body = '' } } else { @{ status = 204; body = '' } } }
-$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 2 -SendFn $sendFn -ReadFn { param($s) @(@{ role = 'user'; text = 'ACK:T1:ses_X:m1' }) } -SleepFn { param($ms) }
+$res = New-CrossDelivery -MsgId 'msg_f3' -Dest 'ses_X' -Text 'hola' -Token 'T1' -OutboxPath $script:OutboxFile -AckTimeoutSec 1 -MaxAttempts 2 -SendFn $sendFn -ReadFn { param($s) @(@{ role = 'user'; text = (New-CrossAckJson -Token 'T1' -Emitter 'ses_X' -Model 'm1' -MsgId 'msg_f3') }) } -SleepFn { param($ms) }
 Assert-True ($res.ok -and $res.attempt -eq 2) 'delivery with retry -> attempt 2' $res.attempt
 Assert-True ((Get-OutboxLine) -match 'attempt=2') 'outbox persists attempt=2' (Get-OutboxLine)
 $att = Set-OutboxAttempt -MsgId 'msg_f3' -Attempt 3 -Path $script:OutboxFile

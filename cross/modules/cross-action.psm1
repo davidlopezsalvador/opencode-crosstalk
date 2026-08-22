@@ -7,6 +7,7 @@ Set-StrictMode -Version 2.0
 
 if (-not (Get-Command ConvertTo-AsciiSafe -ErrorAction SilentlyContinue)) {
     Import-Module (Join-Path $PSScriptRoot '..\lib\cross-format.psm1') -Force -DisableNameChecking
+    Import-Module (Join-Path $PSScriptRoot 'cross-envelope.psm1') -Force -DisableNameChecking
 }
 if (-not (Get-Command Get-CrossConfig -ErrorAction SilentlyContinue)) {
     Import-Module (Join-Path $PSScriptRoot 'cross-transport.psm1') -Force -DisableNameChecking
@@ -53,9 +54,8 @@ function Send-CrossAck {
     $myId = Get-CrossMyId
     if (-not $Dest) { $Dest = $myId }
     if (-not $Model) { $Model = Get-CrossMyModel }
-    $segs = @('ACK', $Token, $myId)
-    if ($Model) { $segs += $Model }
-    $ackText = ($segs -join ':')
+    # D1 (v1.17): ACK como envelope v2 JSON (el receptor lo parsea con Parse-CrossEnvelope)
+    $ackText = New-CrossAckJson -Token $Token -MsgId $ForMsgId -Emitter $myId -Model $Model
     $sent = $false
     if ($SendFn) {
         [void](& $SendFn $Dest $ackText)
@@ -69,7 +69,7 @@ function Send-CrossAck {
         $sent = $true
     }
     $audit = Write-AuditEntry -MsgId $ForMsgId -Dest $Dest -Token $Token -Tipo 'ACK' -Estado 'ENVIADO' -Nota 'ack emitted by leader' -AuditPath $AuditPath
-    return @{ ok = $true; ack_text = $ackText; segments = @($ackText -split ':').Count; to = $Dest; sent = $sent; audit_ok = $audit.ok }
+    return @{ ok = $true; ack_text = $ackText; to = $Dest; sent = $sent; audit_ok = $audit.ok }
 }
 
 function Send-CrossNack {
@@ -95,17 +95,8 @@ function Send-CrossNack {
     $myId = Get-CrossMyId
     if (-not $Dest) { $Dest = $myId }
     if (-not $Model) { $Model = Get-CrossMyModel }
-    $segs = @('NACK', $Token, $myId)
-    if ($Model) { $segs += $Model }
-    $segs += $Reason
-    if ($ForRunId) {
-        if (-not $Model) {
-            return @{ ok = $false; err = 'USAGE_ERROR'; detail = '--for-run-id requires --model or config.my_model (7-segment enriched format)' }
-        }
-        $segs += $ForMsgId
-        $segs += $ForRunId
-    }
-    $nackText = ($segs -join ':')
+    # D1 (v1.17): NACK como envelope v2 JSON (msg_id/run_id embebidos, sin limite de segmentos)
+    $nackText = New-CrossNackJson -Token $Token -MsgId $ForMsgId -Emitter $myId -Model $Model -Reason $Reason -RunId $ForRunId
     $sent = $false
     if ($SendFn) {
         [void](& $SendFn $Dest $nackText)
@@ -122,7 +113,7 @@ function Send-CrossNack {
     if ($Note) { $nota += "; nota=$Note" }
     if ($ForRunId) { $nota += "; run=$ForRunId" }
     $audit = Write-AuditEntry -MsgId $ForMsgId -Dest $Dest -Token $Token -Tipo 'NACK' -Estado 'ENVIADO' -Nota $nota -AuditPath $AuditPath
-    return @{ ok = $true; nack_text = $nackText; segments = @($nackText -split ':').Count; to = $Dest; reason = $Reason; sent = $sent; audit_ok = $audit.ok }
+    return @{ ok = $true; nack_text = $nackText; to = $Dest; reason = $Reason; sent = $sent; audit_ok = $audit.ok }
 }
 
 function Send-CrossResume {

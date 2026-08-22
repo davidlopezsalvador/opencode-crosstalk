@@ -2,6 +2,7 @@
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-nack.ps1
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-action.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\cross-envelope.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-transport.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-delivery.psm1') -Force
 
@@ -30,34 +31,29 @@ Write-Host "== T-nack: NACK 5 segments (model auto-derived from config, no ids) 
 New-Fixture
 $r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_x' -Reason 'CAPACITY' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
 Assert-True ($r.ok) 'nack ok' $r.err
-$expectedSegs = 4
-$expectedText = "NACK:T1:${mySession}:CAPACITY"
-if ($myModel) { $expectedSegs = 5; $expectedText = "NACK:T1:${mySession}:${myModel}:CAPACITY" }
-Assert-True ($r.segments -eq $expectedSegs) "$expectedSegs segments (NACK:token:id[:model]:reason auto-derived)" $r.segments
-Assert-True ($r.nack_text -eq $expectedText) 'basic NACK text with config model' $r.nack_text
+$pA = Parse-CrossEnvelope $r.nack_text
+Assert-True ($pA.valid -and $pA.type -eq 'nack' -and $pA.token -eq 'T1' -and $pA.reason -eq 'CAPACITY' -and $pA.emitter -eq $mySession) 'v2 nack json (config identity)' "$($pA.valid)|$($pA.reason)|$($pA.emitter)"
+if ($myModel) { Assert-True ($pA.model -eq $myModel) 'v2 nack json config model' $pA.model }
 
 Write-Host "== T-nack: NACK 5 segments (with model) =="
 New-Fixture
 $r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_x' -Reason 'CAPACITY' -Model 'model-b' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True ($r.segments -eq 5) '5 segments (NACK:token:id:model:reason)' $r.segments
-$p = Parse-CrossAckText $r.nack_text
-Assert-True ($p.nack -and $p.razon -eq 'CAPACITY') 'parser recovers reason' "$($p.razon)"
-Assert-True ($p.emisor -eq $mySession) 'parser recovers sender' $p.emisor
+$pB = Parse-CrossEnvelope $r.nack_text
+Assert-True ($pB.valid -and $pB.type -eq 'nack' -and $pB.reason -eq 'CAPACITY') 'parser recovers reason' "$($pB.reason)"
+Assert-True ($pB.emitter -eq $mySession -and $pB.model -eq 'model-b') 'parser recovers sender/model' "$($pB.emitter)|$($pB.model)"
 
 Write-Host "== T-nack: msg_id without run_id does NOT enrich frame (5 segments) =="
 New-Fixture
 $r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_x' -Reason 'TOOL_MISSING' -Model 'model-b' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True ($r.segments -eq 5) '5 segments (msg_id alone does not enrich)' $r.segments
-$p = Parse-CrossAckText $r.nack_text
-Assert-True ($p.razon -eq 'TOOL_MISSING') 'reason in 5 segments' $p.razon
+$pC = Parse-CrossEnvelope $r.nack_text
+Assert-True ($pC.reason -eq 'TOOL_MISSING') 'reason present (v2 has no segment ambiguity)' $pC.reason
 
 Write-Host "== T-nack: nack_msg_id/nack_run_id propagation (7 segments, enriched) =="
 New-Fixture
 $r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_orig' -ForRunId 'run_orig' -Reason 'PROVIDER_DOWN' -Model 'model-b' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True ($r.segments -eq 7) '7 segments (with msg_id and run_id)' $r.segments
-$p = Parse-CrossAckText $r.nack_text
-Assert-True ($p.msg_id -eq 'msg_orig' -and $p.run_id -eq 'run_orig') 'parser extracts msg_id/run_id' "$($p.msg_id)|$($p.run_id)"
-Assert-True ($p.razon -eq 'PROVIDER_DOWN') 'reason propagated' $p.razon
+$pD = Parse-CrossEnvelope $r.nack_text
+Assert-True ($pD.msg_id -eq 'msg_orig' -and $pD.run_id -eq 'run_orig') 'v2 embeds msg_id/run_id' "$($pD.msg_id)|$($pD.run_id)"
+Assert-True ($pD.reason -eq 'PROVIDER_DOWN') 'reason propagated' $pD.reason
 
 Write-Host "== T-nack: BUG Y - enriched WITHOUT --model auto-derives from config (7 segments) =="
 if (-not $myModel) {
@@ -66,10 +62,8 @@ if (-not $myModel) {
 New-Fixture
 $r = Send-CrossNack -Token 'T1' -ForMsgId 'msg_x' -ForRunId 'R1' -Reason 'CAPACITY' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
 Assert-True ($r.ok) 'enriched nack ok' $r.err
-Assert-True ($r.segments -eq 7) '7 segments (never ambiguous 6-segment frame)' $r.segments
-Assert-True ($r.nack_text -eq "NACK:T1:${mySession}:${myModel}:CAPACITY:msg_x:R1") 'model auto-derived in position 3' $r.nack_text
-$p = Parse-CrossAckText $r.nack_text
-Assert-True ($p.razon -eq 'CAPACITY' -and $p.msg_id -eq 'msg_x' -and $p.run_id -eq 'R1' -and $p.modelo -eq $myModel) 'parser unambiguous (reason/model/ids correct)' "$($p.razon)|$($p.modelo)|$($p.msg_id)|$($p.run_id)"
+$pE = Parse-CrossEnvelope $r.nack_text
+Assert-True ($pE.reason -eq 'CAPACITY' -and $pE.msg_id -eq 'msg_x' -and $pE.run_id -eq 'R1' -and $pE.model -eq $myModel) 'v2 unambiguous (reason/model/ids correct)' "$($pE.reason)|$($pE.model)|$($pE.msg_id)|$($pE.run_id)"
 }
 
 Write-Host "== T-nack: closed reasons =="

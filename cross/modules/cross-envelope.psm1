@@ -74,7 +74,8 @@ function New-CrossNackJson {
         [string]$Model = '',
         [string]$Reason = '',
         [string]$Detail = '',
-        [string]$Timestamp = ''
+        [string]$Timestamp = '',
+        [string]$RunId = ''
     )
     if (-not $Timestamp) { $Timestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
     $env = [ordered]@{
@@ -88,6 +89,7 @@ function New-CrossNackJson {
     if ($Model) { $env['model'] = $Model }
     if ($Reason) { $env['reason'] = $Reason }
     if ($Detail) { $env['detail'] = $Detail }
+    if ($RunId) { $env['run_id'] = $RunId }
     return ($env | ConvertTo-Json -Depth 4 -Compress)
 }
 

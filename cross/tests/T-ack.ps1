@@ -2,6 +2,7 @@
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-ack.ps1
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-action.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\cross-envelope.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-transport.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-delivery.psm1') -Force
 
@@ -30,27 +31,25 @@ Write-Host "== T-ack: ACK 4 segments (model auto-derived from config) =="
 New-Fixture
 $r = Send-CrossAck -Token 'T1' -ForMsgId 'msg_x' -Dest 'ses_Y' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
 Assert-True ($r.ok) 'ack ok' $r.err
-$expectedSegs = 3
-$expectedText = "ACK:T1:${mySession}"
-if ($myModel) { $expectedSegs = 4; $expectedText += ":${myModel}" }
-Assert-True ($r.segments -eq $expectedSegs) "$expectedSegs segments (ACK:token:id[:model] auto-derived)" $r.segments
-Assert-True ($r.ack_text -eq $expectedText) 'ACK text with config model' $r.ack_text
+$pCfg = Parse-CrossEnvelope $r.ack_text
+Assert-True ($pCfg.valid -and $pCfg.type -eq 'ack' -and $pCfg.token -eq 'T1' -and $pCfg.emitter -eq $mySession) 'v2 ack json (config identity)' "$($pCfg.valid)|$($pCfg.emitter)"
+if ($myModel) { Assert-True ($pCfg.model -eq $myModel) 'v2 ack json config model' $pCfg.model }
 Assert-True ($script:Sent.dest -eq 'ses_Y') 'send destination' $script:Sent.dest
 
 Write-Host "== T-ack: ACK 4 segments (with model) =="
 New-Fixture
 $r = Send-CrossAck -Token 'T1' -ForMsgId 'msg_x' -Dest 'ses_Y' -Model 'model-b' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True ($r.segments -eq 4) '4 segments (ACK:token:id:model)' $r.segments
-Assert-True ($r.ack_text -eq "ACK:T1:${mySession}:model-b") 'model in last position' $r.ack_text
+
+$p4 = Parse-CrossEnvelope $r.ack_text
+Assert-True ($p4.valid -and $p4.model -eq 'model-b' -and $p4.token -eq 'T1') 'v2 ack json with model' "$($p4.model)"
 
 Write-Host "== T-ack: ACK 5 segments (token with suffix + model) =="
 New-Fixture
 $r = Send-CrossAck -Token 'T1:sub' -ForMsgId 'msg_x' -Dest 'ses_Y' -Model 'model-b' -AuditPath $script:AuditFile -SendFn { param($d,$t) Fake-Send $d $t }
-Assert-True ($r.segments -eq 5) '5 segments (token with ':' + model)' $r.segments
-$p = Parse-CrossAckText $r.ack_text
-Assert-True ($p.ack -and $p.token -eq 'T1:sub') 'parser recovers full token with suffix' "$($p.token)"
-Assert-True ($p.emisor -eq $mySession) 'parser recovers sender' $p.emisor
-Assert-True ($p.modelo -eq 'model-b') 'parser recovers model' $p.modelo
+$p = Parse-CrossEnvelope $r.ack_text
+Assert-True ($p.valid -and $p.type -eq 'ack' -and $p.token -eq 'T1:sub') 'parser recovers full token with suffix' "$($p.token)"
+Assert-True ($p.emitter -eq $mySession) 'parser recovers sender' $p.emitter
+Assert-True ($p.model -eq 'model-b') 'parser recovers model' $p.model
 
 Write-Host "== T-ack: empty token -> USAGE_ERROR =="
 New-Fixture

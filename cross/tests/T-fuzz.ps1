@@ -1,4 +1,4 @@
-﻿# Contract parser fuzzing (v1.13): invariantes de robustez ante entradas
+# Contract parser fuzzing (v1.13): invariantes de robustez ante entradas
 # imprevistas (mutaciones, tipos raros, unicode hostil, multiples envelopes,
 # inputs grandes). Determinista: seed fija 20260820. Corpus base en
 # Get-FuzzCorpus: para anadir entradas, extender la funcion (el resto es
@@ -107,20 +107,23 @@ function Test-EnvInv { param([string]$input, [string]$mut, [int]$ci, [int]$mi)
     }
 }
 function Test-AckInv { param([string]$input, [string]$mut, [int]$ci, [int]$mi)
+    # D1 (v1.17): fuzz targets the v2-only parser
     $err = ''; $r = $null
-    try { $r = Parse-CrossAckText -Text $input } catch { $err = $_.Exception.Message }
+    try { $r = Parse-CrossEnvelope -Text $input } catch { $err = $_.Exception.Message }
     if ($err) { Assert-True $false "ack-no-exc [$mut c$ci m$mi]" ("EXC: $err len=$($input.Length) head=" + $input.Substring(0, [Math]::Min(120, $input.Length))); return }
     if ($null -eq $r) { Assert-True $false "ack-result [$mut c$ci m$mi]" 'null'; return }
-    foreach ($k in @('ack','nack','protocolo')) { Assert-True ($r.$k -is [bool]) "ack-$k-bool [$mut c$ci m$mi]" "$k=[$($r.$k)]" }
-    if ($r.ack) {
-        Assert-True ($r.token -is [string] -and $r.token.Length -gt 0) "ack-token [$mut c$ci m$mi]" "token=[$($r.token)]"
-        Assert-True ($r.emisor -is [string]) "ack-emisor [$mut c$ci m$mi]" "emisor=[$($r.emisor)]"
-        Assert-True (-not $r.nack) "ack-notnack [$mut c$ci m$mi]" "nack=$($r.nack)"
-    }
-    if ($r.nack) {
-        Assert-True ($r.token -is [string] -and $r.token.Length -gt 0) "nack-token [$mut c$ci m$mi]" "token=[$($r.token)]"
-        Assert-True ($r.razon -is [string]) "nack-razon [$mut c$ci m$mi]" "razon=[$($r.razon)]"
-        Assert-True (-not $r.ack) "nack-notack [$mut c$ci m$mi]" "ack=$($r.ack)"
+    foreach ($k in @('valid')) { Assert-True ($r.$k -is [bool]) "ack-$k-bool [$mut c$ci m$mi]" "$k=[$($r.$k)]" }
+    if ($r.valid) {
+        Assert-True ($r.requires_ack -is [bool]) "requires_ack-bool [$mut c$ci m$mi]" "requires_ack=[$($r.requires_ack)]"
+        Assert-True ($r.type -in @('message','ack','nack')) "type-closed [$mut c$ci m$mi]" "type=[$($r.type)]"
+        if ($r.type -eq 'ack') {
+            Assert-True ($r.token -is [string] -and $r.token.Length -gt 0) "ack-token [$mut c$ci m$mi]" "token=[$($r.token)]"
+            Assert-True ($r.emitter -is [string]) "ack-emitter [$mut c$ci m$mi]" "emitter=[$($r.emitter)]"
+        }
+        if ($r.type -eq 'nack') {
+            Assert-True ($r.reason -is [string]) "nack-reason [$mut c$ci m$mi]" "reason=[$($r.reason)]"
+            Assert-True ($r.msg_id -is [string] -and $r.msg_id.Length -gt 0) "nack-msgid [$mut c$ci m$mi]" "msg_id=[$($r.msg_id)]"
+        }
     }
 }
 
@@ -169,8 +172,8 @@ $w5 = Parse-CrossEnvelope -Text 'ENVELOPE-V2: {"v":2,"type":"message","msg_id":"
 Assert-True ($w5.valid) 'campos-duplicados-json-tolerado' "valid=$($w5.valid)"
 $w6 = Parse-CrossEnvelope -Text 'ENVELOPE-V2: {"v":2,"type":"message","msg_id":"m","timestamp":"2026-08-21T00:00:00Z"} ENVELOPE-V2: {"v":2,"type":"ack","msg_id":"m2","token":"T9","timestamp":"2026-08-21T00:00:00Z"}'
 Assert-True ($w6.valid -and $w6.type -eq 'message') 'multi-envelope-primero-gana' "type=$($w6.type)"
-$w7 = Parse-CrossAckText 'ENVELOPE-V2: {"v":2,"type":"message","msg_id":"m","timestamp":"2026-08-21T00:00:00Z"}'
-Assert-True (-not $w7.ack -and -not $w7.nack) 'multi-env-message-no-ack' "ack=$($w7.ack) nack=$($w7.nack)"
+$w7 = Parse-CrossEnvelope 'ENVELOPE-V2: {"v":2,"type":"message","msg_id":"m","timestamp":"2026-08-21T00:00:00Z"}'
+Assert-True ($w7.valid -and $w7.type -eq 'message') 'multi-env-message-no-ack' "type=$($w7.type)"
 $w8 = Parse-CrossEnvelope -Text ("ENVELOPE-V2: " + [char]0xFEFF + ' {"v":2,"type":"message","msg_id":"m","timestamp":"2026-08-21T00:00:00Z"}')
 Assert-True ($w8.valid) 'bom-antes-json-tolerado' "valid=$($w8.valid)"
 

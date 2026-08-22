@@ -34,140 +34,6 @@ function Format-CrossEnvelope {
     return "[$($parts -join ' | ')]"
 }
 
-# F4 (v1.16): v1 deprecation - once-per-process warning + usage counter.
-# Full removal planned for v1.17 (migrate Find-AckInList and tests to Parse-CrossEnvelope).
-$script:V1ParseWarned = $false
-$script:V1ParseCount = 0
-
-function Get-CrossV1Usage {
-    return @{ count = $script:V1ParseCount; removed_in = 'v1.17' }
-}
-
-function Parse-CrossAckText {
-    param([AllowEmptyString()][string]$Text = '')
-    $script:V1ParseCount++
-    if (-not $script:V1ParseWarned) {
-        $script:V1ParseWarned = $true
-        Write-Warning 'DEPRECATED: Parse-CrossAckText (v1 format) will be removed in v1.17 - migrate to Parse-CrossEnvelope'
-    }
-    $result = @{ ack = $false; nack = $false; protocolo = $false; token = ''; emisor = ''; modelo = ''; razon = ''; msg_id = ''; run_id = ''; raw = $Text }
-    if (-not $Text) { return $result }
-    # v2 primero (sobre JSON estructurado, Fase 1 v1.9): si el texto trae un
-    # envelope v2 valido (ENVELOPE-V2: {json} o JSON puro), prevalece sobre v1.
-    $v2 = Parse-CrossEnvelope -Text $Text
-    if ($v2.valid) {
-        if ($v2.type -eq 'ack') {
-            $result.ack = $true
-            $result.token = $v2.token
-            $result.emisor = $v2.emitter
-            $result.modelo = $v2.model
-            $result.msg_id = $v2.msg_id
-            $result.run_id = $v2.run_id
-        } elseif ($v2.type -eq 'nack') {
-            $result.nack = $true
-            $result.token = $v2.token
-            $result.emisor = $v2.emitter
-            $result.modelo = $v2.model
-            $result.razon = $v2.reason
-            $result.msg_id = $v2.msg_id
-            $result.run_id = $v2.run_id
-        }
-        return $result
-    }
-    $m = [regex]::Match($Text, '(?<!\S)NACK-PROTOCOLO:([^\s]+)')
-    if ($m.Success) {
-        $result.protocolo = $true
-        $result.razon = 'NACK-PROTOCOLO'
-        $result.token = $m.Groups[1].Value
-        return $result
-    }
-    $m = [regex]::Match($Text, '(?<!\S)ACK-PROTOCOLO:([0-9A-Za-z\.\-]+)')
-    if ($m.Success) {
-        $result.protocolo = $true
-        $result.token = $m.Groups[1].Value
-        return $result
-    }
-    $m = [regex]::Match($Text, '(?<!\S)NACK:([^\s]+)')
-    if ($m.Success) {
-        $result.nack = $true
-        $segs = @($m.Groups[1].Value -split ':')
-        if ($segs.Count -eq 6) {
-            # Formato enriquecido v0.2 (Hallazgo #4): NACK:<token>:<id>:<modelo>:<razon>:<msg_id>:<run_id>
-            $result.token = $segs[0]
-            $result.emisor = $segs[1]
-            $result.modelo = $segs[2]
-            $result.razon = $segs[3]
-            $result.msg_id = $segs[4]
-            $result.run_id = $segs[5]
-        } elseif ($segs.Count -ge 4) {
-            $result.razon = $segs[$segs.Count - 1]
-            $result.modelo = $segs[$segs.Count - 2]
-            $result.emisor = $segs[$segs.Count - 3]
-            $result.token = ($segs[0..($segs.Count - 4)] -join ':')
-        } elseif ($segs.Count -eq 3) {
-            $result.razon = $segs[2]
-            $result.emisor = $segs[1]
-            $result.token = $segs[0]
-        } elseif ($segs.Count -eq 2) {
-            $result.emisor = $segs[1]
-            $result.token = $segs[0]
-        } else {
-            $result.token = $segs[0]
-        }
-        return $result
-    }
-    $m = [regex]::Match($Text, '(?<!\S)ACK:([^\s]+)')
-    if ($m.Success) {
-        $result.ack = $true
-        $segs = @($m.Groups[1].Value -split ':')
-        if ($segs.Count -ge 3) {
-            $result.modelo = $segs[$segs.Count - 1]
-            $result.emisor = $segs[$segs.Count - 2]
-            $result.token = ($segs[0..($segs.Count - 3)] -join ':')
-        } elseif ($segs.Count -eq 2) {
-            $result.emisor = $segs[1]
-            $result.token = $segs[0]
-        } else {
-            $result.token = $segs[0]
-        }
-    } elseif ([regex]::Match($Text, '(?<=:|\s)ACK:([^\s]+)').Success) {
-        # E1 (2026-08-13): ACK precedido de ':' (p.ej. 'TAREA-E2E:ACK:ses_X:m') se cuenta como ACK.
-        $result.ack = $true
-        $m = [regex]::Match($Text, '(?<=:|\s)ACK:([^\s]+)')
-        $segs = @($m.Groups[1].Value -split ':')
-        if ($segs.Count -ge 3) {
-            $result.modelo = $segs[$segs.Count - 1]
-            $result.emisor = $segs[$segs.Count - 2]
-            $result.token = ($segs[0..($segs.Count - 3)] -join ':')
-        } elseif ($segs.Count -eq 2) {
-            $result.emisor = $segs[1]
-            $result.token = $segs[0]
-        } else {
-            $result.token = $segs[0]
-        }
-    }
-    # E1 (2026-08-13): si el texto declara un MSG-token explicito (TOKEN:MSG-...,
-    # 'token MSG-...' o desnudo) prevalece el MSG-token; si no habia ACK explicito,
-    # la declaracion TOKEN:MSG-... cuenta como ACK (variante E2E real).
-    $tokM = [regex]::Match($Text, '(?:TOKEN|Token|token)\s*[:=]\s*(MSG-[0-9A-Za-z\.\-]+)')
-    if (-not $tokM.Success) { $tokM = [regex]::Match($Text, '(?:token|TOKEN)\s+(MSG-[0-9A-Za-z\.\-]+)') }
-    if (-not $tokM.Success) { $tokM = [regex]::Match($Text, '(?<!\S)(MSG-[0-9A-Za-z\.\-]{6,})(?=\s|$|[,;:)])') }
-    if ($tokM.Success) {
-        $tok = $tokM.Groups[1].Value
-        if (-not $result.ack -and -not $result.nack) { $result.ack = $true }
-        if ($result.ack) {
-            $rest = $Text.Substring($tokM.Groups[1].Index + $tok.Length)
-            $m2 = [regex]::Match($rest, '^\s*:\s*([^\s:]+)\s*(?::\s*([^\s:]+))?')
-            if ($m2.Success) {
-                if (-not $result.emisor) { $result.emisor = $m2.Groups[1].Value }
-                if (-not $result.modelo) { $result.modelo = $m2.Groups[2].Value }
-            }
-            if ($result.token -notlike 'MSG-*') { $result.token = $tok }
-        }
-    }
-    return $result
-}
-
 function Test-SessionGrowing {
     param(
         [Parameter(Mandatory=$true)][string]$SessionId,
@@ -296,9 +162,10 @@ function New-CrossDelivery {
     function Find-AckInList($list, [string]$tok) {
         foreach ($item in @($list)) {
             if ($null -eq $item) { continue }
-            $p = Parse-CrossAckText ([string]$item.text)
-            if ($p.ack -and ($p.token -eq $tok -or $p.token -like "$tok*")) { return @{ type = 'ack'; ack_id = $p.emisor; ack_model = $p.modelo } }
-            if ($p.nack -and ($p.token -eq $tok -or $p.token -like "$tok*")) { return @{ type = 'nack'; reason = $p.razon; msg_id = $p.msg_id; run_id = $p.run_id } }
+            # D1 (v1.17): v2-only via Parse-CrossEnvelope (v1 parser removed)
+            $p = Parse-CrossEnvelope ([string]$item.text)
+            if ($p.valid -and $p.type -eq 'ack' -and ($p.token -eq $tok -or $p.token -like "$tok*")) { return @{ type = 'ack'; ack_id = $p.emitter; ack_model = $p.model } }
+            if ($p.valid -and $p.type -eq 'nack' -and ($p.token -eq $tok -or $p.token -like "$tok*")) { return @{ type = 'nack'; reason = $p.reason; msg_id = $p.msg_id; run_id = $p.run_id } }
         }
         return $null
     }
@@ -470,4 +337,4 @@ function Write-CrossDeliveryLog {
     return $line
 }
 
-Export-ModuleMember -Function Format-CrossEnvelope, Parse-CrossAckText, Get-CrossV1Usage, Test-SessionGrowing, Find-CrossOutboxPending, New-CrossDelivery, Write-CrossDeliveryLog
+Export-ModuleMember -Function Format-CrossEnvelope, Test-SessionGrowing, Find-CrossOutboxPending, New-CrossDelivery, Write-CrossDeliveryLog
