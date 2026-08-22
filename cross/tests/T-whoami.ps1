@@ -12,6 +12,7 @@ function Assert-True {
 }
 
 # D4 (v1.17): cross-platform child PowerShell (pwsh on Linux, powershell.exe on Windows)
+if (-not $env:TEMP) { $env:TEMP = [System.IO.Path]::GetTempPath().TrimEnd('/', '\') }
 $psExe = if ($env:OS -eq 'Windows_NT') { 'powershell.exe' } elseif (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell.exe' }
 function Invoke-CrossCli {
     param([string[]]$Args2)

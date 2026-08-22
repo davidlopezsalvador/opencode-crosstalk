@@ -11,6 +11,7 @@ function Assert-True {
     else { $script:fail++; Write-Host ("  FAIL  {0}  {1}" -f $Name, $Detail) }
 }
 # D4 (v1.17): cross-platform child PowerShell (pwsh on Linux, powershell.exe on Windows)
+if (-not $env:TEMP) { $env:TEMP = [System.IO.Path]::GetTempPath().TrimEnd('/', '\') }
 $psExe = if ($env:OS -eq 'Windows_NT') { 'powershell.exe' } elseif (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell.exe' }
 $config = Get-Content (Join-Path $PSScriptRoot '..\cross.config.json') -Raw | ConvertFrom-Json
 $crossRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
