@@ -7,12 +7,12 @@ on:
     branches: [master]
 
 jobs:
-  test:
+  test-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run test suites (server-independent)
+      - name: Run test suites (full matrix)
         shell: pwsh
         run: |
           $totalP = 0; $totalF = 0
@@ -28,4 +28,46 @@ jobs:
             }
           }
           Write-Host ("TOTAL: {0} pass, {1} fail" -f $totalP, $totalF)
+          if ($totalF -gt 0) { exit 1 }
+
+  # D4 (v1.17): validate F3/cross-ipc on Linux - advisory file lock, curl resolution,
+  # config discovery. Only server-independent suites run here (no OpenCode Desktop).
+  test-ubuntu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sanity check environment
+        shell: pwsh
+        run: |
+          Write-Host "pwsh: $($PSVersionTable.PSVersion)"
+          which curl
+          Import-Module ./cross/modules/cross-ipc.psm1 -Force
+          Import-Module ./cross/modules/cross-transport.psm1 -Force
+          Write-Host ("Get-CrossPlatform: " + (Get-CrossPlatform))
+          Write-Host ("Get-CrossCurlCommand: " + (Get-CrossCurlCommand))
+
+      - name: Run server-independent suites (Linux)
+        shell: pwsh
+        run: |
+          $totalP = 0; $totalF = 0
+          # D4: only suites that need no OpenCode Desktop server.
+          # T-idempotencia-race validates the Unix advisory file lock cross-process.
+          $suites = @('T-cli', 'T-port', 'T-ipc', 'T-whoami', 'T-idempotencia-race')
+          foreach ($suite in $suites) {
+            $path = "cross/tests/$suite.ps1"
+            Write-Host "=== Running $suite ==="
+            $out = (pwsh -NoProfile -ExecutionPolicy Bypass -File $path 2>&1) -join "`n"
+            if ($out -match 'RESULT:? (\d+) pass, (\d+) fail') {
+              $p = [int]$Matches[1]; $f = [int]$Matches[2]
+              $totalP += $p; $totalF += $f
+              Write-Host ("{0}: RESULT: {1} pass, {2} fail" -f $suite, $p, $f)
+            } else {
+              Write-Host ("{0}: NO RESULT - output:" -f $suite)
+              ($out -split "`n") | Select-Object -Last 8 | ForEach-Object { Write-Host ("    {0}" -f $_) }
+              $totalF++
+            }
+          }
+          Write-Host ("UBUNTU TOTAL: {0} pass, {1} fail" -f $totalP, $totalF)
           if ($totalF -gt 0) { exit 1 }
