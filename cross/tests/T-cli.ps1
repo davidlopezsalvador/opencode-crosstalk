@@ -1,7 +1,7 @@
 # End-to-end tests for the cross.ps1 CLI (Phase 1).
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tests\T-cli.ps1
 $ErrorActionPreference = 'Stop'
-$cli = Join-Path $PSScriptRoot '..\cross.ps1'
+$cli = Join-Path $PSScriptRoot '../cross.ps1'
 Import-Module (Join-Path $PSScriptRoot '..\modules\cross-transport.psm1') -Force
 
 $pass = 0; $fail = 0
@@ -10,6 +10,8 @@ function Assert-True {
     if ($Cond) { $script:pass++; Write-Host ("  PASS  {0}" -f $Name) }
     else { $script:fail++; Write-Host ("  FAIL  {0}  {1}" -f $Name, $Detail) }
 }
+# D4 (v1.17): cross-platform child PowerShell (pwsh on Linux, powershell.exe on Windows)
+$psExe = if ($env:OS -eq 'Windows_NT') { 'powershell.exe' } elseif (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell.exe' }
 $config = Get-Content (Join-Path $PSScriptRoot '..\cross.config.json') -Raw | ConvertFrom-Json
 $crossRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $mySession = $config.my_session_id
@@ -22,7 +24,7 @@ if (-not $haveServer) {
 function Invoke-CrossCli {
     param([string[]]$CliArgs)
     $tmp = Join-Path $env:TEMP ("cross_cli_" + [System.Guid]::NewGuid().ToString('N') + ".json")
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli @CliArgs 2>$null | Out-File -LiteralPath $tmp -Encoding ascii
+    & $psExe -NoProfile -ExecutionPolicy Bypass -File $cli @CliArgs 2>$null | Out-File -LiteralPath $tmp -Encoding ascii
     $raw = Get-Content -LiteralPath $tmp -Raw
     Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
     return $raw

@@ -2,7 +2,7 @@
 # Verifies that whoami reports the correct identity: shared config (shared_config),
 # explicit overrides (--session-id/--model/--role) and NO_IDENTITY error without config.
 $ErrorActionPreference = 'Stop'
-$cli = Join-Path $PSScriptRoot '..\cross.ps1'
+$cli = Join-Path $PSScriptRoot '../cross.ps1'
 
 $pass = 0; $fail = 0
 function Assert-True {
@@ -11,9 +11,11 @@ function Assert-True {
     else { $script:fail++; Write-Host ("  FAIL  {0}  {1}" -f $Name, $Detail) }
 }
 
+# D4 (v1.17): cross-platform child PowerShell (pwsh on Linux, powershell.exe on Windows)
+$psExe = if ($env:OS -eq 'Windows_NT') { 'powershell.exe' } elseif (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell.exe' }
 function Invoke-CrossCli {
     param([string[]]$Args2)
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli @Args2 2>$null | Out-String
+    & $psExe -NoProfile -ExecutionPolicy Bypass -File $cli @Args2 2>$null | Out-String
 }
 
 function Get-TmpConfig {

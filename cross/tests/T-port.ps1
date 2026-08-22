@@ -7,6 +7,8 @@ Import-Module $ipcMod -Force
 Import-Module $mod -Force
 
 $pass = 0; $fail = 0
+# D4 (v1.17): cross-platform child PowerShell (pwsh on Linux, powershell.exe on Windows)
+$psExe = if ($env:OS -eq 'Windows_NT') { 'powershell.exe' } elseif (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell.exe' }
 function Assert-True {
     param([bool]$Cond, [string]$Name, [string]$Detail = '')
     if ($Cond) { $script:pass++; Write-Host ("  PASS  {0}" -f $Name) }
@@ -47,14 +49,14 @@ $diagCmd = "Import-Module '$mod' -Force; {0}"
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
-    $rDebug = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ($diagCmd -f "Write-CrossDiag -Level debug -Message 'probe-debug'") 2>&1
+    $rDebug = & $psExe -NoProfile -ExecutionPolicy Bypass -Command ($diagCmd -f "Write-CrossDiag -Level debug -Message 'probe-debug'") 2>&1
     Assert-True (($rDebug | Out-String) -notmatch 'probe-debug') 'debug silencioso con CROSS_DIAG por defecto (warn)' ($rDebug | Out-String)
-    $rWarn = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ($diagCmd -f "Write-CrossDiag -Level warn -Message 'probe-warn'") 2>&1
+    $rWarn = & $psExe -NoProfile -ExecutionPolicy Bypass -Command ($diagCmd -f "Write-CrossDiag -Level warn -Message 'probe-warn'") 2>&1
     Assert-True (($rWarn | Out-String) -match 'probe-warn') 'warn visible en stderr (prefijo [cross-diag])' ($rWarn | Out-String)
     $env:OLD_CROSS_DIAG = [Environment]::GetEnvironmentVariable('CROSS_DIAG')
     try {
         [Environment]::SetEnvironmentVariable('CROSS_DIAG', 'trace')
-        $rTrace = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ($diagCmd -f "Write-CrossDiag -Level trace -Message 'probe-trace'") 2>&1
+        $rTrace = & $psExe -NoProfile -ExecutionPolicy Bypass -Command ($diagCmd -f "Write-CrossDiag -Level trace -Message 'probe-trace'") 2>&1
         Assert-True (($rTrace | Out-String) -match 'probe-trace') 'nivel trace visible con CROSS_DIAG=trace (NEMOTRON-N4)' ($rTrace | Out-String)
     } finally {
         if ($env:OLD_CROSS_DIAG) { [Environment]::SetEnvironmentVariable('CROSS_DIAG', $env:OLD_CROSS_DIAG) }
