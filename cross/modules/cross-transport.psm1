@@ -207,7 +207,13 @@ function Write-CrossPortWellKnown {
     }
 }
 
-function Get-CrossPortFromLog {
+# D2 (v1.17): DEPRECATED - free-text scrape of a third-party log.
+# Removal planned for v1.18 (discovery is covered by well-known file + /global/health + cache).
+$script:PortFromLogWarned = $false
+    if (-not $script:PortFromLogWarned) {
+        $script:PortFromLogWarned = $true
+        Write-CrossDiag -Level warn -Message 'DEPRECATED: Get-CrossPortFromLog scrapes main.log and will be removed in v1.18'
+    }function Get-CrossPortFromLog {
     $logsDir = Expand-Path ([Environment]::GetEnvironmentVariable('CROSS_DESKTOP_LOGS_DIR'))
     if (-not $logsDir) {
         $config = Get-CrossConfig
@@ -290,6 +296,36 @@ function Get-CrossPortByScan {
     return $null
 }
 
+# D2 (v1.17): structured session state via API (GET /session/:id).
+# Returns ok/status/last_activity_at/model/checkable. Mockable via SessionFn.
+function Get-CrossSessionState {
+    param(
+        [Parameter(Mandatory=$true)][string]$Id,
+        [int]$Port = 0,
+        [string]$Password = '',
+        [scriptblock]$SessionFn
+    )
+    if ($SessionFn) { return @(& $SessionFn $Id) }
+    $api = Invoke-CrossApi -Method 'GET' -Path "/session/$Id" -Port $Port -Password $Password -TimeoutSec 8
+    if ($api.status -ne 200) {
+        return @{ ok = $false; status_code = [int]$api.status; status = ''; last_activity_at = ''; model = ''; checkable = $false }
+    }
+    $s = $null
+    try { $s = $api.body | ConvertFrom-Json } catch { }
+    if ($null -eq $s) { return @{ ok = $false; status_code = 200; status = ''; last_activity_at = ''; model = ''; checkable = $false } }
+    function Get-Str2([object]$o, [string]$k) {
+        $p = $o.PSObject.Properties[$k]
+        if ($null -ne $p -and $null -ne $p.Value) { return [string]$p.Value }
+        return ''
+    }
+    return @{
+        ok = $true; status_code = 200
+        status = (Get-Str2 $s 'status')
+        last_activity_at = (Get-Str2 $s 'lastActivityAt')
+        model = (Get-Str2 $s 'model')
+        checkable = $true
+    }
+}
 function Resolve-CrossEndpoint {
     param(
         [int]$Port = 0,
@@ -438,4 +474,4 @@ function Invoke-CrossApi {
     return @{ status = [int]$code; body = $body }
 }
 
-Export-ModuleMember -Function Import-CrossConfig, Get-CrossConfig, Get-CrossCurlCommand, Get-CrossPassword, Get-PasswordHash, Get-CrossNetrcFile, Test-CrossHealthRaw, Resolve-CrossEndpoint, Invoke-CrossApi, Get-CrossPortFromCache, Write-CrossPortCache, Get-CrossPortFromLog, Get-CrossPortByScan, Get-CrossPortWellKnown, Write-CrossPortWellKnown, Write-CrossDiag
+Export-ModuleMember -Function Import-CrossConfig, Get-CrossConfig, Get-CrossCurlCommand, Get-CrossPassword, Get-PasswordHash, Get-CrossNetrcFile, Test-CrossHealthRaw, Resolve-CrossEndpoint, Invoke-CrossApi, Get-CrossPortFromCache, Write-CrossPortCache, Get-CrossPortFromLog, Get-CrossPortByScan, Get-CrossPortWellKnown, Write-CrossPortWellKnown, Write-CrossDiag, Get-CrossSessionState

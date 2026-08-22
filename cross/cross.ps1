@@ -118,7 +118,7 @@ Usage:
   cross escalate --msg-id X --to ses_Y --reason "..." [--run-id R] [--apply]
   cross dlq --msg-id X [--to ses_Y] [--retries N] [--flag F] [--summary "..."] [--outbox-file PATH]
   cross quarantine --msg-id X --reason "..." [--check-log] [--outbox-file PATH]
-  cross diagnose --msg X [--outbox-file PATH] [--minutes N]
+  cross diagnose --msg X [--outbox-file PATH] [--sleep-threshold-sec N]
   cross metrics [--since ISO8601] [--until ISO8601] [--by-agent ses_Y] [--log-path PATH]
                 [--json | --human]
 
@@ -734,13 +734,14 @@ switch ($Command) {
         Out-Result $r 'quarantine' -Watch $watch
     }
     'diagnose' {
+        # D2 (v1.17): structured API-first diagnosis (no third-party log scraping)
         $watch = [System.Diagnostics.Stopwatch]::StartNew()
-        $minutes = if ($flags['minutes']) { [int]$flags['minutes'] } else { 10 }
-        $res = Get-CrossDiagnose -Msg ([string]$flags['msg']) -OutboxPath ([string]$flags['outbox-file']) -Minutes $minutes
+        $sleepSec = if ($flags['sleep-threshold-sec']) { [int]$flags['sleep-threshold-sec'] } else { 300 }
+        $res = Get-CrossDiagnose -Msg ([string]$flags['msg']) -OutboxPath ([string]$flags['outbox-file']) -SleepThresholdSec $sleepSec
         $r = New-Result -Ok $res.ok -Code $(if ($res.ok) { 0 } else { 64 }) -Data @{
-            msg = $res.msg; dest = $res.dest; log_path = $res.log_path; window_minutes = $res.window_minutes
-            matched_count = $res.matched_count; matched = $res.matched; classification = $res.classification
-            action = $res.action; err = $res.err; detail = $res.detail
+            msg = $res.msg; dest = $res.dest; classification = $res.classification
+            action = $res.action; source = $res.source; session_status = $res.session_status
+            idle_seconds = $res.idle_seconds; detail = $res.detail; err = $res.err
         } -Cmd 'diagnose'
         Out-Result $r 'diagnose' -Watch $watch
     }

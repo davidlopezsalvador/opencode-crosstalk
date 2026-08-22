@@ -59,6 +59,11 @@ if ($NoReply) { $cliArgs += '--no-wait' }
 if ($Puerto) { $cliArgs += "--port=$Puerto" }
 if ($Password) { $cliArgs += "--password=$Password" }
 [Console]::Error.WriteLine("NOTE: send_message.ps1 delegated to cross send (msg_id=$msgId). Outbox/audit/retries active.")
+# v1.17: PS5.1 quirk - native stderr under EAP=Stop throws even when redirected.
+# Diag warnings (deprecation) must not abort the send; restore EAP afterwards.
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 $raw = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Cli @cliArgs 2>$null | Out-String
+$ErrorActionPreference = $prevEap
 [Console]::WriteLine($raw.Trim())
 exit $LASTEXITCODE

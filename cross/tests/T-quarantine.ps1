@@ -51,18 +51,11 @@ New-Fixture
 $r = Set-CrossQuarantine -MsgId 'msg_no_existe' -Reason 'r' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile
 Assert-True (-not $r.ok -and $r.err -eq 'OUTBOX_MSG_NOT_FOUND') 'msg not found' $r.err
 
-Write-Host "== T-quarantine: --check-log diagnoses via opencode.log (case 524) =="
-$now = (Get-Date).ToUniversalTime()
-$qts1 = $now.AddMinutes(-2).ToString('yyyy-MM-ddTHH:mm:ssZ')
-$qts2 = $now.AddMinutes(-1).ToString('yyyy-MM-ddTHH:mm:ssZ')
-$logWith524 = @"
-timestamp=$qts1 level=ERROR run=r1 message="stream error" session.id=ses_X provider=openai
-timestamp=$qts2 level=ERROR run=r1 message="stream error 524" session.id=ses_X
-"@
-New-Fixture $logWith524
-$r = Set-CrossQuarantine -MsgId 'msg_q' -Reason 'r' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -LogPath $script:LogFile -AuditPath $script:AuditFile -CheckLog
+Write-Host "== T-quarantine: --check-log classifies via structured diagnosis (D2, case 524 equivalent) =="
+New-Fixture
+$r = Set-CrossQuarantine -MsgId 'msg_q' -Reason 'r' -OutboxPath $script:OutboxFile -DlqPath $script:DlqFile -AuditPath $script:AuditFile -CheckLog -HealthFn { $false }
 Assert-True ($r.log_diagnostic.ok) 'diagnosis ok' $r.log_diagnostic.err
-Assert-True ($r.log_diagnostic.classification -eq 'PROVIDER_DOWN') 'case 524 -> PROVIDER_DOWN' $r.log_diagnostic.classification
+Assert-True ($r.log_diagnostic.classification -eq 'PROVIDER_DOWN') 'unhealthy server -> PROVIDER_DOWN' $r.log_diagnostic.classification
 $content = Get-Content -LiteralPath $script:DlqFile -Raw
 Assert-True ($content -match 'log=PROVIDER_DOWN') 'classification appended to summary' $content
 

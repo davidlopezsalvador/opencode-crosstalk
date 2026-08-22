@@ -319,7 +319,9 @@ function Set-CrossQuarantine {
         [string]$LogPath = '',
         [string]$AuditPath = '',
         [int]$Minutes = 10,
-        [switch]$CheckLog
+        [switch]$CheckLog,
+        [scriptblock]$HealthFn = $null,
+        [scriptblock]$SessionFn = $null
     )
     if (-not $MsgId) { return @{ ok = $false; err = 'USAGE_ERROR'; detail = 'missing --msg-id' } }
     if (-not $Reason) { return @{ ok = $false; err = 'USAGE_ERROR'; detail = 'missing --reason' } }
@@ -329,7 +331,8 @@ function Set-CrossQuarantine {
     if (-not $entry) { return @{ ok = $false; err = 'OUTBOX_MSG_NOT_FOUND'; detail = $MsgId } }
     $diag = $null
     if ($CheckLog) {
-        $diag = Get-CrossDiagnose -Msg $MsgId -OutboxPath $OutboxPath -LogPath $LogPath -Minutes $Minutes
+        # D2 (v1.17): structured diagnosis; LogPath/Minutes legacy params are ignored
+        $diag = Get-CrossDiagnose -Msg $MsgId -OutboxPath $OutboxPath -HealthFn $HealthFn -SessionFn $SessionFn
     }
     $summary = $Reason
     if ($diag -and $diag.ok -and $diag.classification) { $summary += "; log=$($diag.classification)" }
@@ -343,57 +346,101 @@ function Set-CrossQuarantine {
 }
 
 function Get-CrossDiagnose {
+    <#
+    D2 (v1.17): structured failure diagnosis (HY3 design, API-first hybrid).
+    Contract:
+      1. CONFIG_ERROR   <- local validation (session-id format, token presence)
+      2. PROVIDER_DOWN  <- /global/health unhealthy (Test-CrossHealthRaw)
+      3. AGENT_SLEEPING <- Get-CrossSessionState: status in {idle,asleep} OR
+                           now - lastActivityAt > SleepThresholdSec
+      4. fallback NO_ERROR when no structured signal is available.
+    NEVER scrapes third-party application logs. Fully mockable:
+    -HealthFn / -SessionFn scriptblocks for CI without a live server.
+    #>
     param(
         [AllowEmptyString()][string]$Msg,
         [string]$OutboxPath = '',
-        [string]$LogPath = '',
-        [int]$Minutes = 10
+        [int]$Port = 0,
+        [string]$Password = '',
+        [int]$SleepThresholdSec = 300,
+        [scriptblock]$HealthFn,
+        [scriptblock]$SessionFn
     )
-    if (-not $Msg) { return @{ ok = $false; err = 'USAGE_ERROR'; detail = 'missing --msg' } }
+    if (-not $Msg) { return @{ ok = $false; err = 'USAGE_ERROR'; detail = 'missing --msg'; classification = 'NO_DATA'; source = 'none' } }
     if (-not $OutboxPath) { $OutboxPath = (Get-CrossActionPaths).outbox }
-    if (-not $LogPath) { $LogPath = (Get-CrossActionPaths).log }
     $entry = @(Read-OutboxLog -Path $OutboxPath | Where-Object { $_.msg_id -eq $Msg }) | Select-Object -First 1
     $dest = ''
-    if ($entry) { $dest = [string]$entry.dest }
-    if (-not $LogPath -or -not (Test-Path -LiteralPath $LogPath)) {
-        return @{ ok = $false; err = 'LOG_NOT_FOUND'; detail = $LogPath; msg = $Msg; dest = $dest }
+    $token = ''
+    if ($entry) {
+        $dest = [string]$entry.dest
+        if ($entry.token) { $token = [string]$entry.token }
     }
-    $deadline = (Get-Date).ToUniversalTime().AddMinutes(-$Minutes)
-    $matched = New-Object System.Collections.ArrayList
-    foreach ($line in (Get-Content -LiteralPath $LogPath)) {
-        $l = $line.Trim()
-        if (-not $l) { continue }
-        if ($dest -and $l -notmatch [regex]::Escape($dest)) { continue }
-        if ($l -match 'timestamp=(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)') {
-            try {
-                $ts = [System.DateTime]::Parse($Matches[1], [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
-                if ($ts -lt $deadline) { continue }
-            } catch { }
-        }
-        [void]$matched.Add($l)
-    }
-    $joined = @($matched) -join "`n"
-    $classification = 'NO_DATA'
-    $action = 'no lines from the destination in the window: agent asleep or different session'
-    if ($matched.Count -gt 0) {
-        if ($joined -match 'model not found|model_not_found|no such model|invalid model|not a valid model|unauthori[sz]ed|invalid api key|invalid_api_key|api.?key|authentication failed|\b401\b|\b403\b') {
-            $classification = 'CONFIG_ERROR'
-            $action = 'configuration error (auth/model): report to human in DLQ'
-        } elseif ($joined -match 'AI_APICallError|Upstream request failed|Endpoint is unavailable|stream error|\[5\d\d\]|\[504\]|\[524\]|connect timeout|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|Rate limit exceeded') {
-            $classification = 'PROVIDER_DOWN'
-            $action = 'provider failure, healthy agent: renew lease and wait (12.10)'
-        } elseif ($joined -match 'exiting loop') {
-            $classification = 'AGENT_SLEEPING'
-            $action = 'agente dormido o muerto: seguir la escalada normal (12.6 -> DLQ)'
-        } else {
-            $classification = 'NO_ERROR'
-            $action = 'sin errores en el intervalo: verificar ACK o escalar (12.10)'
-        }
-    }
-    return @{
-        ok = $true; msg = $Msg; dest = $dest; log_path = $LogPath; window_minutes = $Minutes
-        matched = @($matched); matched_count = $matched.Count; classification = $classification; action = $action
-    }
-}
 
+    # 1) CONFIG_ERROR <- local validation, no network
+    if ($dest -and $dest -notmatch '^ses_[0-9A-Za-z]+$') {
+        return @{ ok = $true; msg = $Msg; dest = $dest; classification = 'CONFIG_ERROR'
+                  action = 'invalid destination session-id format: fix config or outbox entry'
+                  source = 'local-validation' }
+    }
+    if (-not $token) {
+        return @{ ok = $true; msg = $Msg; dest = $dest; classification = 'CONFIG_ERROR'
+                  action = 'outbox entry has no token: re-send with a fresh token'
+                  source = 'local-validation' }
+    }
+    $pw = if ($Password) { $Password } else { $p = Get-CrossPassword; if ($p) { $p.value } else { '' } }
+    if (-not $pw) {
+        return @{ ok = $true; msg = $Msg; dest = $dest; classification = 'CONFIG_ERROR'
+                  action = 'OPENCODE_SERVER_PASSWORD not defined (env or .env)'
+                  source = 'local-validation' }
+    }
+
+    # 2) PROVIDER_DOWN <- /global/health
+    $healthy = $null
+    if ($HealthFn) { $healthy = & $HealthFn } else {
+        $ep = Resolve-CrossEndpoint -Port $Port -Password $pw
+        if (-not $ep.ok) {
+            return @{ ok = $true; msg = $Msg; dest = $dest; classification = 'PROVIDER_DOWN'
+                      action = 'server unreachable/health failed: wait and retry delivery'
+                      source = 'api-health'; detail = $ep.err }
+        }
+        $h = Test-CrossHealthRaw -Port $ep.port -Password $pw
+        $healthy = $h.healthy
+    }
+    if ($healthy -eq $false) {
+        return @{ ok = $true; msg = $Msg; dest = $dest; classification = 'PROVIDER_DOWN'
+                  action = 'provider/server unhealthy: renew lease and wait (12.10)'
+                  source = 'api-health' }
+    }
+
+    # 3) AGENT_SLEEPING <- structured session state of the destination
+    $state = $null
+    if ($SessionFn) { $state = @(& $SessionFn $dest) } elseif ($dest) {
+        $ep = Resolve-CrossEndpoint -Port $Port -Password $pw
+        if ($ep.ok) { $state = Get-CrossSessionState -Id $dest -Port $ep.port -Password $pw }
+    }
+    if ($state -and $state.ok) {
+        $st = [string]$state.status
+        if ($st -in @('idle', 'asleep')) {
+            return @{ ok = $true; msg = $Msg; dest = $dest; classification = 'AGENT_SLEEPING'
+                      action = 'destination idle/asleep: nudge (12.10) then escalate if persistent'
+                      source = 'api-session-state'; session_status = $st }
+        }
+        if ($state.last_activity_at) {
+            try {
+                $la = [System.DateTime]::Parse($state.last_activity_at, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+                $idleFor = ((Get-Date).ToUniversalTime() - $la).TotalSeconds
+                if ($idleFor -gt $SleepThresholdSec) {
+                    return @{ ok = $true; msg = $Msg; dest = $dest; classification = 'AGENT_SLEEPING'
+                              action = "no activity for $([int]$idleFor)s (> ${SleepThresholdSec}s): nudge (12.10)"
+                              source = 'api-session-state'; idle_seconds = [int]$idleFor }
+                }
+            } catch { } # unparseable timestamp -> keep falling through to NO_ERROR
+        }
+    }
+
+    # 4) fallback: explicit NO_ERROR (no blind classification)
+    return @{ ok = $true; msg = $Msg; dest = $dest; classification = 'NO_ERROR'
+              action = 'no structured failure signal: verify ACK via audit/reconcile (12.10)'
+              source = $(if ($state -and $state.checkable) { 'api-session-state' } else { 'none' }) }
+}
 Export-ModuleMember -Function Send-CrossAck, Send-CrossNack, Send-CrossResume, Restart-CrossTask, Send-CrossNudge, Write-CrossEscalated, Write-CrossDlq, Set-CrossQuarantine, Get-CrossDiagnose, Get-CrossActionPaths, Get-CrossMyId
