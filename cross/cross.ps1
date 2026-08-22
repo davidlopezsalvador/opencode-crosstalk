@@ -541,7 +541,7 @@ switch ($Command) {
             $applyRetry = [bool]$flags['apply']
             $plan = New-Object System.Collections.ArrayList
             foreach ($e in $vencidos) {
-                $diag = Get-CrossDiagnose -Msg ([string]$e.msg_id) -OutboxPath $outboxFile -Minutes 10
+                $diag = Get-CrossDiagnose -Msg ([string]$e.msg_id) -OutboxPath $outboxFile
                 $classification = if ($diag.ok) { [string]$diag.classification } else { 'NO_DATA' }
                 $action = 'NO_ACTION'
                 if ($classification -eq 'PROVIDER_DOWN') { $action = 'RENEW_LEASE' }

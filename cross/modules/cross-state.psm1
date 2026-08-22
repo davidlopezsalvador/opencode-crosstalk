@@ -585,15 +585,26 @@ function Add-CrossLogLine {
     )
     $parent = Split-Path -Parent $Path
     if ($parent -and -not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-    for ($i = 0; $i -lt $MaxRetries; $i++) {
-        try {
-            [System.IO.File]::AppendAllText($Path, $Line + "`n", (New-Object System.Text.UTF8Encoding($false)))
-            return @{ ok = $true; path = $Path }
-        } catch [System.IO.IOException] {
-            if (($i + 1) -lt $MaxRetries) { Start-Sleep -Milliseconds $BackoffMs[$i] }
-        } catch {
-            return @{ ok = $false; err = 'LOG_WRITE_ERROR'; detail = $_.Exception.Message }
+    # v1.17: serialize cross-process appends via the same named-mutex family used
+    # by outbox/idempotencia (prevents lost lines under concurrent bursts).
+    $mutex = Get-OutboxMutex -Path $Path
+    $locked = $false
+    try {
+        $locked = $mutex.WaitOne(10000)
+        if (-not $locked) { return @{ ok = $false; err = 'LOG_LOCKED'; detail = 'could not acquire log mutex within 10s' } }
+        for ($i = 0; $i -lt $MaxRetries; $i++) {
+            try {
+                [System.IO.File]::AppendAllText($Path, $Line + "`n", (New-Object System.Text.UTF8Encoding($false)))
+                return @{ ok = $true; path = $Path }
+            } catch [System.IO.IOException] {
+                if (($i + 1) -lt $MaxRetries) { Start-Sleep -Milliseconds $BackoffMs[$i] }
+            } catch {
+                return @{ ok = $false; err = 'LOG_WRITE_ERROR'; detail = $_.Exception.Message }
+            }
         }
+        return @{ ok = $false; err = 'LOG_LOCKED'; detail = 'could not append the line after retries (backoff 200/400/800ms)' }
+    } finally {
+        if ($locked) { try { $mutex.ReleaseMutex() } catch { } }
     }
     return @{ ok = $false; err = 'LOG_LOCKED'; detail = 'could not append the line after retries (backoff 200/400/800ms)' }
 }

@@ -388,7 +388,9 @@ function Get-CrossDiagnose {
                   source = 'local-validation' }
     }
     $pw = if ($Password) { $Password } else { $p = Get-CrossPassword; if ($p) { $p.value } else { '' } }
-    if (-not $pw) {
+    # D2 fix: when HealthFn is mocked (CI), credential absence must not shadow the
+    # scenario under test - only enforce password in real (non-mocked) runs.
+    if (-not $pw -and -not $HealthFn) {
         return @{ ok = $true; msg = $Msg; dest = $dest; classification = 'CONFIG_ERROR'
                   action = 'OPENCODE_SERVER_PASSWORD not defined (env or .env)'
                   source = 'local-validation' }
