@@ -212,7 +212,9 @@ function Write-CrossPortWellKnown {
 $script:PortFromLogWarned = $false
     if (-not $script:PortFromLogWarned) {
         $script:PortFromLogWarned = $true
-        Write-CrossDiag -Level warn -Message 'DEPRECATED: Get-CrossPortFromLog scrapes main.log and will be removed in v1.18'
+        # level=info: visible with CROSS_DIAG=info; silent by default so callers
+        # capturing stderr under EAP=Stop are not broken (PS5.1 native stderr quirk)
+        Write-CrossDiag -Level info -Message 'DEPRECATED: Get-CrossPortFromLog scrapes main.log and will be removed in v1.18'
     }function Get-CrossPortFromLog {
     $logsDir = Expand-Path ([Environment]::GetEnvironmentVariable('CROSS_DESKTOP_LOGS_DIR'))
     if (-not $logsDir) {

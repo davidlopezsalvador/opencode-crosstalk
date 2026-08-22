@@ -108,9 +108,12 @@ Write-Host "== T-diagnose: port-from-log deprecated =="
 # stderr bajo EAP=Stop no debe matar el test; y el hijo necesita ruta absoluta
 $modPath = Join-Path $PSScriptRoot '..\modules\cross-transport.psm1'
 $prevEap = $ErrorActionPreference
+$prevDiag = $env:CROSS_DIAG
+$env:CROSS_DIAG = 'info'
 $ErrorActionPreference = 'Continue'
 $child = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Import-Module '$modPath' -Force -DisableNameChecking; `$null = Get-CrossPortFromLog" 2>&1 | Out-String
 $ErrorActionPreference = $prevEap
+if ($null -ne $prevDiag) { $env:CROSS_DIAG = $prevDiag } else { Remove-Item Env:\CROSS_DIAG -ErrorAction SilentlyContinue }
 $warned = $child -match 'DEPRECATED: Get-CrossPortFromLog scrapes main\.log and will be removed in v1\.18'
 Assert-True $warned 'port-from-log emits v1.18 deprecation warning' ''
 
